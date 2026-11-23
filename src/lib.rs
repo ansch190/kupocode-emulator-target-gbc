@@ -19,6 +19,7 @@ pub mod joypad;
 pub mod model;
 pub mod ppu;
 pub mod serial;
+pub mod sgb;
 pub mod timer;
 pub mod views;
 

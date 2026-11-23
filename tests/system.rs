@@ -157,3 +157,14 @@ fn ton_liefert_44100_abtastwerte_je_sekunde() {
         audio.frames()
     );
 }
+
+#[test]
+fn super_game_boy_gibt_256_mal_224_aus() {
+    let mut gb = Gb::from_rom(&rom_with_flags(&[0x18, 0xFE], &[], 0, 0x03)).unwrap();
+    gb.run_frame();
+    let fb = gb.framebuffer();
+    assert_eq!((fb.width(), fb.height()), (256, 224));
+    // Ohne Mehrspieler meldet P1 bei abgewählten Zeilen keine Spielerkennung.
+    gb.poke(0xFF00, &[0x30]).unwrap();
+    assert_eq!(gb.bus.peek(0xFF00) & 0x0F, 0x0F);
+}

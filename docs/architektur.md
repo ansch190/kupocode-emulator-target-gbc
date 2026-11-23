@@ -23,7 +23,9 @@ src/
   timer.rs        `Timer`: Systemzähler/DIV, TIMA mit Flanken- und Ladeverhalten
   apu.rs          `Apu`: vier Kanäle, Frame-Sequencer, Mischung, Hochpass, 44,1 kHz
   serial.rs       `Serial`: SB/SC, Ausgabe für Testprogramme
-  joypad.rs       `Joypad`: P1, Tastenzuordnung, Unterbrechung
+  joypad.rs       `Joypad`: P1, Tastenzuordnung, vier Spieler (SGB), Unterbrechung
+  sgb.rs          `Sgb`: Pakete über P1, Paletten/Attribute, *_TRN aus dem Bild, Rahmen,
+                  Maske, Mehrspieler; setzt die Ausgabe 256 × 224 zusammen
   ppu.rs          `Ppu`: Zeilen und Modi, LY/STAT, OAM-Suche, Fetcher und Pixel-FIFOs;
                   `ColorState` (CGB-Paletten, CGB-Modus oder Kompatibilitätsmodus)
   views.rs        Debug-Ansichten: Kacheln, Kachelkarten, OAM, CGB-Paletten
@@ -59,6 +61,8 @@ src/
   Bei doppeltem Takt läuft die PPU 2 Punkte je M-Zyklus; `Bus::cycles` zählt den Grundtakt.
 - **Frame-Sequencer der APU:** schaltet bei der fallenden Flanke von DIV Bit 4 (doppelter Takt:
   Bit 5) weiter, auch beim Zurücksetzen von DIV. Die Kanäle laufen im Grundtakt.
+- **SGB-Übertragungen:** `*_TRN` liest die 4 KB aus den Graustufen des nächsten fertigen Bildes
+  (`Sgb::end_frame`), wie die Hardware nach `BGP`. Das SNES-BIOS ist nicht nachgebildet.
 - **CGB-Modus vs. Kompatibilität:** `ppu.color.cgb` = Hardware ist ein CGB, `cgb_mode` = CGB-
   Funktionen an. Register wie VBK, SVBK, KEY1 und HDMA prüfen `cgb_mode`.
 - **Uhr der Kassette:** zählt emulierte Takte (`Mapper::tick`); die Zeit zwischen zwei

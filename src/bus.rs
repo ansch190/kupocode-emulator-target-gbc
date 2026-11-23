@@ -13,6 +13,7 @@ use crate::joypad::Joypad;
 use crate::model::Model;
 use crate::ppu::Ppu;
 use crate::serial::Serial;
+use crate::sgb::Sgb;
 use crate::timer::Timer;
 
 /// Unterbrechungsbits in `IF`/`IE`.
@@ -54,6 +55,8 @@ pub struct Bus {
     pub joypad: Joypad,
     pub ppu: Ppu,
     pub apu: Apu,
+    /// Super Game Boy (nur bei den SGB-Modellen).
+    pub sgb: Option<Sgb>,
     /// Letzter Wert von `FF46`.
     pub dma_reg: u8,
     /// Laufende OAM-DMA: nächstes Byte (0–159), `None` = keine.
@@ -90,6 +93,7 @@ impl Bus {
             joypad: Joypad::default(),
             ppu,
             apu: Apu::new(model.is_cgb()),
+            sgb: model.is_sgb().then(Sgb::default),
             dma_reg: 0,
             dma_index: None,
             dma_delay: 0,
@@ -139,7 +143,10 @@ impl Bus {
             0xC000..=0xFDFF => self.wram[self.wram_index(addr)],
             0xFE00..=0xFE9F => self.ppu.oam[usize::from(addr - 0xFE00)],
             0xFEA0..=0xFEFF => 0x00,
-            0xFF00 => self.joypad.read(),
+            0xFF00 => match self.sgb.as_ref().and_then(|s| s.player_id()) {
+                Some(id) if self.joypad.select == 0x30 => 0xF0 | id,
+                _ => self.joypad.read(),
+            },
             0xFF01 | 0xFF02 => self.serial.read(addr),
             0xFF04..=0xFF07 => self.timer.read(addr),
             0xFF0F => self.if_ | 0xE0,
@@ -192,7 +199,13 @@ impl Bus {
                 self.wram[i] = v;
             }
             0xFE00..=0xFE9F => self.ppu.oam[usize::from(addr - 0xFE00)] = v,
-            0xFF00 => self.joypad.write(v),
+            0xFF00 => {
+                self.joypad.write(v);
+                if let Some(sgb) = self.sgb.as_mut() {
+                    sgb.write_p1(v);
+                    self.joypad.player = sgb.player;
+                }
+            }
             0xFF01 | 0xFF02 => self.serial.write(addr, v),
             0xFF04 => {
                 // Zurücksetzen von DIV kann eine fallende Flanke für den Frame-Sequencer sein.
@@ -391,6 +404,9 @@ impl Bus {
         self.joypad.save_state(w);
         self.ppu.save_state(w);
         self.apu.save_state(w);
+        if let Some(sgb) = &self.sgb {
+            sgb.save_state(w);
+        }
         w.u8(self.dma_reg);
         w.option(self.dma_index.as_ref(), |w, &i| w.u8(i));
         w.u8(self.dma_delay);
@@ -426,6 +442,9 @@ impl Bus {
         self.joypad.load_state(r)?;
         self.ppu.load_state(r)?;
         self.apu.load_state(r)?;
+        if let Some(sgb) = &mut self.sgb {
+            sgb.load_state(r)?;
+        }
         self.dma_reg = r.u8()?;
         self.dma_index = r.option(|r| r.u8())?;
         self.dma_delay = r.u8()?;

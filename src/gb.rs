@@ -384,6 +384,11 @@ impl Gb {
     }
 
     fn update_framebuffer(&mut self) {
+        if let Some(sgb) = &mut self.bus.sgb {
+            sgb.end_frame(&self.bus.ppu.lines);
+            sgb.compose(&self.bus.ppu.lines, &mut self.framebuffer);
+            return;
+        }
         let cgb = self.bus.ppu.color.cgb;
         for (i, &px) in self.bus.ppu.lines.iter().enumerate() {
             let x = i as u32 % WIDTH;
@@ -541,12 +546,14 @@ impl Machine for Gb {
     }
 
     fn set_input(&mut self, input: &Input) {
-        let pad = &input.pads[0];
-        self.bus.joypad.set_buttons(if pad.connected {
-            pad.buttons
-        } else {
-            Default::default()
-        });
+        for (i, pad) in input.pads.iter().enumerate() {
+            let buttons = if pad.connected {
+                pad.buttons
+            } else {
+                Default::default()
+            };
+            self.bus.joypad.set_buttons(i, buttons);
+        }
     }
 
     fn run_frame(&mut self) -> StopReason {

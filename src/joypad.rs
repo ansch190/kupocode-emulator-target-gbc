@@ -16,8 +16,10 @@ const DIRECTION: [Buttons; 4] = [Buttons::RIGHT, Buttons::LEFT, Buttons::UP, But
 pub struct Joypad {
     /// Auswahlbits 4 und 5 von `P1`.
     pub select: u8,
-    /// Gedrückte Tasten.
-    pub buttons: Buttons,
+    /// Gedrückte Tasten je Spieler (Mehrspieler nur beim SGB).
+    pub pads: [Buttons; 4],
+    /// Abgefragter Spieler.
+    pub player: u8,
     /// Zuletzt gelesene untere vier Bits (für die Flanke der Unterbrechung).
     last: u8,
 }
@@ -28,7 +30,7 @@ impl Joypad {
         let row = |keys: &[Buttons; 4]| {
             keys.iter()
                 .enumerate()
-                .filter(|(_, b)| self.buttons.contains(**b))
+                .filter(|(_, b)| self.pads[usize::from(self.player & 3)].contains(**b))
                 .fold(0u8, |m, (i, _)| m | (1 << i))
         };
         if self.select & 0x10 == 0 {
@@ -48,8 +50,8 @@ impl Joypad {
         self.select = v & 0x30;
     }
 
-    pub fn set_buttons(&mut self, b: Buttons) {
-        self.buttons = b;
+    pub fn set_buttons(&mut self, player: usize, b: Buttons) {
+        self.pads[player & 3] = b;
     }
 
     /// Prüft die Eingangsleitungen; `true` bei einer fallenden Flanke (Unterbrechung).
@@ -63,11 +65,13 @@ impl Joypad {
     pub fn save_state(&self, w: &mut StateWriter) {
         w.u8(self.select);
         w.u8(self.last);
+        w.u8(self.player);
     }
 
     pub fn load_state(&mut self, r: &mut StateReader<'_>) -> Result<(), StateError> {
         self.select = r.u8()?;
         self.last = r.u8()?;
+        self.player = r.u8()?;
         Ok(())
     }
 }

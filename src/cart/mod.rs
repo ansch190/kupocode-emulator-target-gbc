@@ -1,5 +1,22 @@
 //! Kassette: Kopf (`0x100`–`0x14F`) und Mapper.
 
+mod mbc1;
+mod mbc2;
+mod mbc3;
+mod mbc5;
+mod rom_only;
+mod rtc;
+
+#[cfg(test)]
+mod tests;
+
+pub use mbc1::Mbc1;
+pub use mbc2::Mbc2;
+pub use mbc3::Mbc3;
+pub use mbc5::Mbc5;
+pub use rom_only::RomOnly;
+pub use rtc::Rtc;
+
 use kupocode_emulator_core::state::{StateError, StateReader, StateWriter};
 
 /// Angaben aus dem Kassettenkopf.
@@ -60,12 +77,71 @@ impl CartridgeInfo {
         })
     }
 
-    /// Erzeugt den passenden Mapper.
-    pub fn into_mapper(self, rom: Vec<u8>) -> Result<Box<dyn Mapper>, String> {
+    /// Hat die Kassette eine Batterie?
+    pub fn has_battery(&self) -> bool {
+        matches!(
+            self.cart_type,
+            0x03 | 0x06
+                | 0x09
+                | 0x0D
+                | 0x0F
+                | 0x10
+                | 0x13
+                | 0x1B
+                | 0x1E
+                | 0x22
+                | 0xFC
+                | 0xFE
+                | 0xFF
+        )
+    }
+
+    /// Name des Kassettentyps.
+    pub fn type_name(&self) -> &'static str {
         match self.cart_type {
-            0x00 | 0x08 | 0x09 => Ok(Box::new(RomOnly::new(rom, self.ram_bytes))),
-            t => Err(format!("Kassettentyp ${t:02X} wird noch nicht unterstützt")),
+            0x00 => "ROM",
+            0x01..=0x03 => "MBC1",
+            0x05 | 0x06 => "MBC2",
+            0x08 | 0x09 => "ROM+RAM",
+            0x0B..=0x0D => "MMM01",
+            0x0F..=0x13 => "MBC3",
+            0x19..=0x1E => "MBC5",
+            0x20 => "MBC6",
+            0x22 => "MBC7",
+            0xFC => "Pocket Camera",
+            0xFE => "HuC3",
+            0xFF => "HuC1",
+            _ => "unbekannt",
         }
+    }
+
+    /// Erzeugt den passenden Mapper.
+    pub fn into_mapper(self, mut rom: Vec<u8>) -> Result<Box<dyn Mapper>, String> {
+        // ROM auf die Größe aus dem Kopf (mindestens 32 KB) auffüllen, damit Bankmasken passen.
+        let size = (self.rom_banks * 0x4000)
+            .max(rom.len().next_power_of_two())
+            .max(0x8000);
+        rom.resize(size, 0xFF);
+        let battery = self.has_battery();
+        let ram = self.ram_bytes;
+        Ok(match self.cart_type {
+            0x00 | 0x08 | 0x09 => Box::new(RomOnly::new(rom, ram, battery)),
+            0x01..=0x03 => Box::new(Mbc1::new(rom, ram, battery)),
+            0x05 | 0x06 => Box::new(Mbc2::new(rom, battery)),
+            0x0F..=0x13 => Box::new(Mbc3::new(
+                rom,
+                ram,
+                battery,
+                matches!(self.cart_type, 0x0F | 0x10),
+            )),
+            0x19..=0x1E => Box::new(Mbc5::new(rom, ram, battery, self.cart_type >= 0x1C)),
+            t => {
+                return Err(format!(
+                    "Kassettentyp ${t:02X} ({}) wird noch nicht unterstützt",
+                    self.type_name()
+                ));
+            }
+        })
     }
 }
 
@@ -84,58 +160,86 @@ pub trait Mapper: Send {
     fn bank_at(&self, addr: u16) -> usize {
         usize::from(addr >= 0x4000)
     }
-    /// Batteriegepuffertes RAM (leer ohne Batterie).
-    fn battery_ram(&self) -> &[u8] {
-        &[]
+    /// Lässt Uhren der Kassette laufen; `cycles` in Takten des Grundtakts (4,194304 MHz).
+    fn tick(&mut self, _cycles: u32) {}
+    /// Hat die Kassette eine Batterie (Spielstand bleibt erhalten)?
+    fn has_battery(&self) -> bool {
+        false
     }
-    fn load_battery_ram(&mut self, _data: &[u8]) {}
+    /// Batteriegepuffertes RAM samt Uhr im üblichen Format (BGB/VBA: 48-Byte-Anhang mit
+    /// `now` als Unix-Zeitstempel). Leer ohne Batterie.
+    fn battery_ram(&self, _now: u64) -> Vec<u8> {
+        Vec::new()
+    }
+    /// Lädt das Batterie-RAM. Liefert den gespeicherten Zeitstempel der Uhr, falls vorhanden.
+    fn load_battery_ram(&mut self, _data: &[u8]) -> Option<u64> {
+        None
+    }
+    /// Stellt die Uhr der Kassette um `seconds` vor (Zeit, in der das Spiel nicht lief).
+    fn advance_rtc(&mut self, _seconds: u64) {}
+    /// Läuft der Rumble-Motor?
+    fn rumble(&self) -> bool {
+        false
+    }
     fn save_state(&self, w: &mut StateWriter);
     fn load_state(&mut self, r: &mut StateReader<'_>) -> Result<(), StateError>;
 }
 
-/// Kassette ohne Mapper (bis 32 KB ROM, optional 8 KB RAM).
-pub struct RomOnly {
-    rom: Vec<u8>,
-    ram: Vec<u8>,
+/// Gemeinsame Bausteine: ROM und RAM mit Bankzugriff.
+#[derive(Debug, Clone)]
+pub struct Memory {
+    pub rom: Vec<u8>,
+    pub ram: Vec<u8>,
+    pub battery: bool,
 }
 
-impl RomOnly {
-    pub fn new(mut rom: Vec<u8>, ram_bytes: usize) -> Self {
-        rom.resize(0x8000, 0xFF);
+impl Memory {
+    pub fn new(rom: Vec<u8>, ram_bytes: usize, battery: bool) -> Self {
         Self {
             rom,
-            ram: vec![0; ram_bytes.min(0x2000)],
-        }
-    }
-}
-
-impl Mapper for RomOnly {
-    fn read(&self, addr: u16) -> u8 {
-        match addr {
-            0x0000..=0x7FFF => self.rom[usize::from(addr)],
-            _ => self
-                .ram
-                .get(usize::from(addr - 0xA000))
-                .copied()
-                .unwrap_or(0xFF),
+            ram: vec![0; ram_bytes],
+            battery,
         }
     }
 
-    fn write(&mut self, addr: u16, v: u8) {
-        if let Some(b) = addr
-            .checked_sub(0xA000)
-            .and_then(|a| self.ram.get_mut(usize::from(a)))
-        {
-            *b = v;
+    pub fn rom_banks(&self) -> usize {
+        self.rom.len() / 0x4000
+    }
+
+    /// Liest aus ROM-Bank `bank` (über die Größe gespiegelt).
+    pub fn rom_read(&self, bank: usize, addr: u16) -> u8 {
+        let bank = bank % self.rom_banks();
+        self.rom[bank * 0x4000 + usize::from(addr & 0x3FFF)]
+    }
+
+    fn ram_index(&self, bank: usize, addr: u16) -> Option<usize> {
+        if self.ram.is_empty() {
+            return None;
+        }
+        let i = bank * 0x2000 + usize::from(addr & 0x1FFF);
+        Some(i % self.ram.len())
+    }
+
+    pub fn ram_read(&self, bank: usize, addr: u16) -> u8 {
+        self.ram_index(bank, addr).map_or(0xFF, |i| self.ram[i])
+    }
+
+    pub fn ram_write(&mut self, bank: usize, addr: u16, v: u8) {
+        if let Some(i) = self.ram_index(bank, addr) {
+            self.ram[i] = v;
         }
     }
 
-    fn save_state(&self, w: &mut StateWriter) {
-        w.blob(&self.ram);
+    pub fn battery_ram(&self) -> Vec<u8> {
+        if self.battery {
+            self.ram.clone()
+        } else {
+            Vec::new()
+        }
     }
 
-    fn load_state(&mut self, r: &mut StateReader<'_>) -> Result<(), StateError> {
-        self.ram = r.blob()?;
-        Ok(())
+    pub fn load_battery_ram(&mut self, data: &[u8]) {
+        let n = data.len().min(self.ram.len());
+        self.ram[..n].copy_from_slice(&data[..n]);
     }
 }

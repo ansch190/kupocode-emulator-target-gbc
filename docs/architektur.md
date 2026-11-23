@@ -23,7 +23,10 @@ src/
   serial.rs       `Serial`: SB/SC, Ausgabe für Testprogramme
   joypad.rs       `Joypad`: P1, Tastenzuordnung, Unterbrechung
   ppu.rs          `Ppu`: Zeitverhalten, LY/STAT, VRAM/OAM (Bildausgabe folgt)
-  cart/           `CartridgeInfo` (Kopf), `trait Mapper`, je Mapper eine Datei
+  cart/           `CartridgeInfo` (Kopf, Typen), `trait Mapper`, `Memory` (ROM/RAM mit Banken)
+    rom_only.rs mbc1.rs (mit MBC1M) mbc2.rs mbc3.rs (mit MBC30) mbc5.rs (mit Rumble)
+    rtc.rs        `Rtc`: Uhr des MBC3, Latch, 48-Byte-Anhang (BGB/VBA)
+    tests.rs      Banken, Modi, Uhr, Batterieformat
   cpu/            SM83: `Cpu`, `trait CpuBus` (ein Aufruf = ein M-Zyklus), `Step`
     opcodes.rs    Referenztabellen (Länge, M-Zyklen), nur für Disassembler und Tests
     tests.rs      Zyklen aller Opcodes, Flags, Unterbrechungen, HALT
@@ -44,6 +47,8 @@ src/
 - **`peek` ohne Seiteneffekte:** Debugger, Disassembler und DMA lesen über `Bus::peek`.
 - **Zyklen nur über den Bus:** Die CPU zählt keine Zyklen aus Tabellen; jeder M-Zyklus ist
   ein Aufruf von `read`, `write` oder `tick`. `cpu/tests.rs` prüft das gegen `opcodes.rs`.
+- **Uhr der Kassette:** zählt emulierte Takte (`Mapper::tick`); die Zeit zwischen zwei
+  Spielsitzungen stellt die GUI mit `advance_rtc` nach. Nur sie liest die Systemzeit.
 - **Optimiert auch im Debug-Build:** `Cargo.toml` setzt `opt-level = 2` für Abhängigkeiten
   und Tests, sonst laufen Testprogramme zu langsam.
 

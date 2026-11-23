@@ -175,6 +175,9 @@ impl Bus {
             self.if_ |= IRQ_JOYPAD;
         }
         self.if_ |= self.ppu.tick(4);
+        if let Some(c) = self.cart.as_mut() {
+            c.tick(4);
+        }
         self.step_dma();
     }
 

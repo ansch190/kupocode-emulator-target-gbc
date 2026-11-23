@@ -151,7 +151,7 @@ impl Gb {
             .bus
             .cart
             .as_ref()
-            .map(|c| c.battery_ram().to_vec())
+            .map(|c| c.battery_ram(0))
             .unwrap_or_default();
         let breakpoints = std::mem::take(&mut self.bus.breakpoints);
         let mut cart = info.into_mapper(self.rom.clone())?;
@@ -436,6 +436,33 @@ impl Gb {
             }
         }
         StopReason::StepLimit
+    }
+
+    /// Batteriegepuffertes RAM samt Uhr; `now` ist der Unix-Zeitstempel für den Uhr-Anhang.
+    /// Leer, wenn die Kassette keine Batterie hat.
+    pub fn battery_ram(&self, now: u64) -> Vec<u8> {
+        self.bus
+            .cart
+            .as_ref()
+            .map(|c| c.battery_ram(now))
+            .unwrap_or_default()
+    }
+
+    /// Lädt das Batterie-RAM; liefert den gespeicherten Zeitstempel der Uhr, falls vorhanden.
+    pub fn load_battery_ram(&mut self, data: &[u8]) -> Option<u64> {
+        self.bus.cart.as_mut()?.load_battery_ram(data)
+    }
+
+    /// Stellt die Uhr der Kassette um `seconds` vor.
+    pub fn advance_rtc(&mut self, seconds: u64) {
+        if let Some(c) = self.bus.cart.as_mut() {
+            c.advance_rtc(seconds);
+        }
+    }
+
+    /// Läuft der Rumble-Motor der Kassette?
+    pub fn rumble(&self) -> bool {
+        self.bus.cart.as_ref().is_some_and(|c| c.rumble())
     }
 
     pub fn save_state_bytes(&self) -> Vec<u8> {

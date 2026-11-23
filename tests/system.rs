@@ -141,6 +141,10 @@ fn ton_liefert_44100_abtastwerte_je_sekunde() {
     use kupocode_emulator_gbc::core::audio::AudioBuffer;
     let mut gb = Gb::from_rom(&rom(&[0x18, 0xFE], &[])).unwrap();
     let mut audio = AudioBuffer::new(44_100);
+    // Das erste Bild nach dem Start endet schon bei Zeile 144; erst danach messen.
+    gb.run_frame();
+    gb.drain_audio(&mut audio);
+    audio.clear();
     for _ in 0..60 {
         gb.run_frame();
         gb.drain_audio(&mut audio);

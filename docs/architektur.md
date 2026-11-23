@@ -16,6 +16,11 @@ Orientierung für die Weiterentwicklung: Aufbau, zentrale Typen, Invarianten und
 src/
   lib.rs          Crate-Wurzel, Re-Exporte
   main.rs         CLI `kupocode-emulator-gbc`
+  cpu/            SM83: `Cpu`, `trait CpuBus` (ein Aufruf = ein M-Zyklus), `Step`
+    opcodes.rs    Referenztabellen (Länge, M-Zyklen), nur für Disassembler und Tests
+    tests.rs      Zyklen aller Opcodes, Flags, Unterbrechungen, HALT
+  disasm.rs       `decode`/`lines` (Schreibweise RGBDS)
+  hook.rs         `trait CpuHook`, `InstrCtx`, `NoHook`
 ```
 
 ## Invarianten und Fallstricke
@@ -26,9 +31,11 @@ src/
   Anwender angegebenen Datei.
 - **Deterministisch:** Zeit ist nur der emulierte Takt, auch für die Echtzeituhr der Kassette;
   gleiche Eingabe ergibt gleiche Bilder.
+- **Zyklen nur über den Bus:** Die CPU zählt keine Zyklen aus Tabellen; jeder M-Zyklus ist
+  ein Aufruf von `read`, `write` oder `tick`. `cpu/tests.rs` prüft das gegen `opcodes.rs`.
 - **Optimiert auch im Debug-Build:** `Cargo.toml` setzt `opt-level = 2` für Abhängigkeiten
   und Tests, sonst laufen Testprogramme zu langsam.
 
 ## Tests
 
-- Unit-Tests in den Modulen.
+- Unit-Tests in den Modulen; `cpu/tests.rs` mit flachem Testspeicher.

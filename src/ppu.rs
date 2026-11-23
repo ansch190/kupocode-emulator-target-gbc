@@ -609,7 +609,8 @@ impl Ppu {
                     self.mode = 0;
                     self.off_dots = 0;
                     self.stat_line = false;
-                    self.lines.fill(0);
+                    // Ausgeschaltetes LCD zeigt Weiß (DMG: Graustufe 0, CGB: RGB555 $7FFF)
+                    self.lines.fill(if self.color.cgb { 0x7FFF } else { 0 });
                 } else if !was_on && self.enabled() {
                     self.ly = 0;
                     self.dot = 0;

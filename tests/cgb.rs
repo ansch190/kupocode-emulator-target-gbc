@@ -135,3 +135,12 @@ fn objektprioritaet_nach_oam_index() {
     frame(&mut gb);
     assert_eq!(gb.framebuffer().pixel(5, 0), rgb(RED));
 }
+
+#[test]
+fn ausgeschaltetes_lcd_ist_weiss() {
+    // LCDC = 0; JR $
+    let mut gb = cgb(&[0xAF, 0xE0, 0x40, 0x18, 0xFE]);
+    gb.run_frame();
+    gb.run_frame();
+    assert_eq!(gb.framebuffer().pixel(10, 10), [255, 255, 255, 255]);
+}

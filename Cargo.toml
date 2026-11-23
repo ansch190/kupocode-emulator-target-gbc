@@ -1,0 +1,27 @@
+[package]
+name = "kupocode-emulator-gbc"
+version = "0.1.0"
+edition = "2024"
+description = "KupoCode Emulator für den Game Boy und Game Boy Color."
+license = "PolyForm-Noncommercial-1.0.0"
+repository = "https://github.com/ansch190/kupocode-emulator-target-gbc"
+publish = false
+
+[lib]
+name = "kupocode_emulator_gbc"
+path = "src/lib.rs"
+
+[[bin]]
+name = "kupocode-emulator-gbc"
+path = "src/main.rs"
+
+[dependencies]
+# Für die lokale Entwicklung auf ../kupocode-emulator-core umbiegen: siehe .cargo/config.toml.example
+kupocode-emulator-core = { git = "https://github.com/ansch190/kupocode-emulator-core" }
+
+# Die Emulation läuft auch in Tests optimiert (sonst laufen Testprogramme sehr langsam).
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.test]
+opt-level = 2

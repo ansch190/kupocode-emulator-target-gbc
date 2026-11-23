@@ -78,6 +78,9 @@ Desktop.ini
 *.fds
 *.sfc
 *.smc
+*.gb
+*.gbc
+*.sgb
 *.z64
 *.n64
 *.v64

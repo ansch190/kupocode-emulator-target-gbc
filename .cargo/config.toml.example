@@ -1,0 +1,12 @@
+# Lokale Entwicklung: Kopie als `.cargo/config.toml` anlegen (steht in .gitignore).
+# Cargo nimmt dann die Nachbar-Ordner statt der GitHub-Repositories.
+#
+# Enthält genau die Kupo-Repositories, von denen dieses Repository abhängt (auch indirekt):
+# Ungenutzte Einträge erzeugen Warnungen und landen als [[patch.unused]] in der Cargo.lock.
+# Reihenfolge wie die Push-Reihenfolge des Kupo Environment.
+#
+# Cargo schreibt dabei die Cargo.lock auf Pfadquellen um. Der Pre-commit-Hook verhindert, dass
+# sie so eingecheckt wird; zurücksetzen mit `git checkout Cargo.lock`.
+
+[patch."https://github.com/ansch190/kupocode-emulator-core"]
+kupocode-emulator-core = { path = "../kupocode-emulator-core" }

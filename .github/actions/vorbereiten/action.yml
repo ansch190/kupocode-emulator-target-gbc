@@ -1,0 +1,69 @@
+# Gemeinsamer Teil: in allen Kupo-Repositories gleich, nur überall gleichzeitig ändern.
+#
+# Bereitet einen CI-Job vor (nach actions/checkout):
+# - Zugriff auf die privaten Kupo-Repositories, falls ein Cargo.toml Git-Abhängigkeiten darauf hat
+# - Rust-Toolchain (stable mit rustfmt und clippy) und Cache
+# - KUPO_LOCKED=--locked, falls Cargo.lock versioniert ist (Anwendungen und CLI-Programme)
+# - beim nächtlichen Lauf: neueste Stände aller Kupo-Abhängigkeiten aus Cargo.lock
+name: Kupo-CI vorbereiten
+description: Token, Toolchain, Cache und nächtliche Aktualisierung der Kupo-Abhängigkeiten
+
+inputs:
+  token:
+    description: Secret KUPO_CI_TOKEN (Fine-grained Token mit Contents read auf die Kupo-Repositories)
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Zugriff auf die privaten Kupo-Repositories
+      shell: bash
+      env:
+        KUPO_CI_TOKEN: ${{ inputs.token }}
+      run: |
+        if ! grep -rqsE --include=Cargo.toml --exclude-dir=target 'git *= *"https://github.com/ansch190/' .; then
+          echo "Keine Git-Abhängigkeiten auf Kupo-Repositories: kein Token nötig."
+          exit 0
+        fi
+        if [ -z "$KUPO_CI_TOKEN" ]; then
+          echo "::error::Secret KUPO_CI_TOKEN fehlt (Fine-grained Token mit Contents: read auf die Kupo-Repositories)."
+          exit 1
+        fi
+        # Leerraum (z. B. ein Zeilenende vom Einfügen) entfernen: Er macht die URL ungültig
+        TOKEN="$(printf '%s' "$KUPO_CI_TOKEN" | tr -d '[:space:]')"
+        if [ "$TOKEN" != "$KUPO_CI_TOKEN" ]; then
+          echo "::warning::Secret KUPO_CI_TOKEN enthält Leerraum oder ein Zeilenende – bitte neu setzen."
+        fi
+        case "$TOKEN" in
+          github_pat_*|ghp_*) ;;
+          *) echo "::warning::Secret KUPO_CI_TOKEN sieht nicht wie ein GitHub-Token aus (${#TOKEN} Zeichen)." ;;
+        esac
+        git config --global url."https://x-access-token:${TOKEN}@github.com/ansch190/".insteadOf "https://github.com/ansch190/"
+        # Cargo klont die Git-Abhängigkeiten über die git-CLI, damit sie das Token nutzt
+        echo "CARGO_NET_GIT_FETCH_WITH_CLI=true" >> "$GITHUB_ENV"
+
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - uses: Swatinem/rust-cache@v2
+
+    - name: Cargo.lock versioniert? Dann mit --locked bauen
+      shell: bash
+      run: |
+        if git ls-files --error-unmatch Cargo.lock >/dev/null 2>&1; then
+          echo "KUPO_LOCKED=--locked" >> "$GITHUB_ENV"
+        fi
+
+    - name: "Nächtlich: neueste Stände der Kupo-Repositories"
+      if: github.event_name == 'schedule'
+      shell: bash
+      run: |
+        # Ohne versionierte Cargo.lock löst Cargo ohnehin frisch auf
+        git ls-files --error-unmatch Cargo.lock >/dev/null 2>&1 || exit 0
+        PAKETE="$(awk '/^name = /{n=$3} /^source = "git\+https:\/\/github.com\/ansch190\//{gsub(/"/,"",n); print n}' Cargo.lock | sort -u)"
+        if [ -n "$PAKETE" ]; then
+          echo "Aktualisiere:" $PAKETE
+          cargo update $PAKETE
+        fi

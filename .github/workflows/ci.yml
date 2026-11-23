@@ -1,0 +1,50 @@
+# Kontinuierliche Integration: Formatierung, Lints und Tests.
+# Aufbau in allen Kupo-Repositories gleich; die gemeinsame Vorbereitung (Token, Toolchain,
+# Cache, nächtliche Aktualisierung) steht in .github/actions/vorbereiten.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Nächtlicher Lauf gegen die neuesten Stände der anderen Kupo-Repositories: So fällt auf,
+    # wenn eine Änderung dort dieses Repository bricht.
+    - cron: "30 2 * * *"
+
+permissions:
+  contents: read
+
+# Überholte Läufe eines Pull Requests abbrechen. Alle anderen Läufe (main, nächtlich, von Hand)
+# bekommen je eine eigene Gruppe: Sie laufen immer zu Ende und werden nie verworfen.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    # Großzügig: Ohne Cache (nach 7 Tagen ungenutzt gelöscht) dauert der Windows-Build der IDE
+    # über 20 Minuten.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/vorbereiten
+        with:
+          token: ${{ secrets.KUPO_CI_TOKEN }}
+      - name: Formatierung
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+      - name: Clippy (Warnungen sind Fehler)
+        run: cargo clippy --workspace --all-targets $KUPO_LOCKED -- -D warnings
+      - name: Tests
+        run: cargo test --workspace $KUPO_LOCKED

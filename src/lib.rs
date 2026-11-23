@@ -8,6 +8,17 @@
 
 pub use kupocode_emulator_core as core;
 
+pub mod bus;
+pub mod cart;
 pub mod cpu;
 pub mod disasm;
+pub mod gb;
 pub mod hook;
+pub mod joypad;
+pub mod model;
+pub mod ppu;
+pub mod serial;
+pub mod timer;
+
+pub use gb::{Gb, TestResult};
+pub use model::Model;

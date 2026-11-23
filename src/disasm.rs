@@ -89,6 +89,22 @@ pub fn decode(bytes: &[u8], addr: u16) -> (String, u8) {
     (text, length(op))
 }
 
+/// Sprungziel eines Befehls (`jp`, `jr`, `call`, `rst`), sonst `None`.
+pub fn target(bytes: &[u8], addr: u16) -> Option<u16> {
+    let b = |i: usize| bytes.get(i).copied().unwrap_or(0);
+    let op = b(0);
+    match op {
+        0x18 | 0x20 | 0x28 | 0x30 | 0x38 => {
+            Some(addr.wrapping_add(2).wrapping_add(b(1) as i8 as u16))
+        }
+        0xC2 | 0xC3 | 0xCA | 0xD2 | 0xDA | 0xC4 | 0xCC | 0xCD | 0xD4 | 0xDC => {
+            Some(u16::from_le_bytes([b(1), b(2)]))
+        }
+        _ if op & 0xC7 == 0xC7 => Some(u16::from(op & 0x38)),
+        _ => None,
+    }
+}
+
 /// Disassembliert `count` Befehle ab `addr`; `read` liefert Bytes ohne Seiteneffekte.
 pub fn lines(
     addr: u16,

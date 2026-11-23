@@ -14,8 +14,16 @@ Orientierung für die Weiterentwicklung: Aufbau, zentrale Typen, Invarianten und
 
 ```text
 src/
-  lib.rs          Crate-Wurzel, Re-Exporte
-  main.rs         CLI `kupocode-emulator-gbc`
+  lib.rs          Crate-Wurzel, Re-Exporte (`Gb`, `Model`, `TestResult`)
+  main.rs         CLI `kupocode-emulator-gbc` (run, test, disasm)
+  gb.rs           `Gb`: Machine, DebugTarget, SaveState (`KGBC`); HLE-Start, Test-Erkennung
+  model.rs        `Model` (Dmg, Cgb, Sgb, Sgb2), Wahl nach dem Kassettenkopf
+  bus.rs          `Bus`: Adressraum, I/O, OAM-DMA, Boot-ROM, Watchpoints; taktet die Peripherie
+  timer.rs        `Timer`: Systemzähler/DIV, TIMA mit Flanken- und Ladeverhalten
+  serial.rs       `Serial`: SB/SC, Ausgabe für Testprogramme
+  joypad.rs       `Joypad`: P1, Tastenzuordnung, Unterbrechung
+  ppu.rs          `Ppu`: Zeitverhalten, LY/STAT, VRAM/OAM (Bildausgabe folgt)
+  cart/           `CartridgeInfo` (Kopf), `trait Mapper`, je Mapper eine Datei
   cpu/            SM83: `Cpu`, `trait CpuBus` (ein Aufruf = ein M-Zyklus), `Step`
     opcodes.rs    Referenztabellen (Länge, M-Zyklen), nur für Disassembler und Tests
     tests.rs      Zyklen aller Opcodes, Flags, Unterbrechungen, HALT
@@ -31,6 +39,9 @@ src/
   Anwender angegebenen Datei.
 - **Deterministisch:** Zeit ist nur der emulierte Takt, auch für die Echtzeituhr der Kassette;
   gleiche Eingabe ergibt gleiche Bilder.
+- **Reihenfolge im M-Zyklus:** Der Bus taktet erst die Peripherie (Timer, Seriell, Joypad,
+  PPU, DMA) um 4 Takte, dann folgt der Zugriff der CPU.
+- **`peek` ohne Seiteneffekte:** Debugger, Disassembler und DMA lesen über `Bus::peek`.
 - **Zyklen nur über den Bus:** Die CPU zählt keine Zyklen aus Tabellen; jeder M-Zyklus ist
   ein Aufruf von `read`, `write` oder `tick`. `cpu/tests.rs` prüft das gegen `opcodes.rs`.
 - **Optimiert auch im Debug-Build:** `Cargo.toml` setzt `opt-level = 2` für Abhängigkeiten
@@ -39,3 +50,5 @@ src/
 ## Tests
 
 - Unit-Tests in den Modulen; `cpu/tests.rs` mit flachem Testspeicher.
+- `tests/system.rs`: ganze Maschine mit Kassetten aus `tests/common` (`rom`, `serial_print`,
+  `mooneye_pass`): HLE-Start, Timer, DMA, Boot-ROM, Debugger, Save-States.

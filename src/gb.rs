@@ -580,6 +580,10 @@ impl DebugTarget for Gb {
         true
     }
 
+    fn graphics_views(&self) -> Vec<kupocode_emulator_core::debug::GraphicsView> {
+        crate::views::views(&self.bus.ppu, self.bus.model.is_cgb())
+    }
+
     fn pc(&self) -> u32 {
         self.code_address(self.cpu.pc)
     }

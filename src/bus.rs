@@ -196,8 +196,13 @@ impl Bus {
         }
     }
 
-    fn dma_blocks(&self, addr: u16) -> bool {
-        self.dma_index.is_some() && (0xFE00..=0xFEFF).contains(&addr)
+    /// Ist der Zugriff der CPU gesperrt (OAM während DMA oder Mode 2/3, VRAM in Mode 3)?
+    fn blocked(&self, addr: u16) -> bool {
+        match addr {
+            0x8000..=0x9FFF => !self.ppu.vram_accessible(),
+            0xFE00..=0xFEFF => self.dma_index.is_some() || !self.ppu.oam_accessible(),
+            _ => false,
+        }
     }
 
     fn check_watch(&mut self, addr: u16, access: Access) {
@@ -266,7 +271,7 @@ impl CpuBus for Bus {
     fn read(&mut self, addr: u16) -> u8 {
         self.step_peripherals();
         self.check_watch(addr, Access::Read);
-        if self.dma_blocks(addr) {
+        if self.blocked(addr) {
             return 0xFF;
         }
         self.peek(addr)
@@ -275,7 +280,7 @@ impl CpuBus for Bus {
     fn write(&mut self, addr: u16, value: u8) {
         self.step_peripherals();
         self.check_watch(addr, Access::Write);
-        if self.dma_blocks(addr) {
+        if self.blocked(addr) {
             return;
         }
         self.poke(addr, value);

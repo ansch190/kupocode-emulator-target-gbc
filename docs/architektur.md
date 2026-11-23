@@ -22,7 +22,8 @@ src/
   timer.rs        `Timer`: Systemzähler/DIV, TIMA mit Flanken- und Ladeverhalten
   serial.rs       `Serial`: SB/SC, Ausgabe für Testprogramme
   joypad.rs       `Joypad`: P1, Tastenzuordnung, Unterbrechung
-  ppu.rs          `Ppu`: Zeitverhalten, LY/STAT, VRAM/OAM (Bildausgabe folgt)
+  ppu.rs          `Ppu`: Zeilen und Modi, LY/STAT, OAM-Suche, Fetcher und Pixel-FIFOs
+  views.rs        Debug-Ansichten: Kacheln, Kachelkarten, OAM
   cart/           `CartridgeInfo` (Kopf, Typen), `trait Mapper`, `Memory` (ROM/RAM mit Banken)
     rom_only.rs mbc1.rs (mit MBC1M) mbc2.rs mbc3.rs (mit MBC30) mbc5.rs (mit Rumble)
     rtc.rs        `Rtc`: Uhr des MBC3, Latch, 48-Byte-Anhang (BGB/VBA)
@@ -47,6 +48,10 @@ src/
 - **`peek` ohne Seiteneffekte:** Debugger, Disassembler und DMA lesen über `Bus::peek`.
 - **Zyklen nur über den Bus:** Die CPU zählt keine Zyklen aus Tabellen; jeder M-Zyklus ist
   ein Aufruf von `read`, `write` oder `tick`. `cpu/tests.rs` prüft das gegen `opcodes.rs`.
+- **Länge von Mode 3 nie berechnen:** Sie ergibt sich aus Fetcher, FIFO, verworfenen Pixeln,
+  Fensterstart und Objektabrufen. Die Tests in `ppu.rs` sichern 172/175/178/183 Punkte ab.
+- **Gesperrte Zugriffe:** Der Bus liefert VRAM in Mode 3 und OAM in Mode 2/3 sowie während der
+  DMA als `$FF` und verwirft Schreibzugriffe; `peek`/`poke` des Debuggers sind nicht gesperrt.
 - **Uhr der Kassette:** zählt emulierte Takte (`Mapper::tick`); die Zeit zwischen zwei
   Spielsitzungen stellt die GUI mit `advance_rtc` nach. Nur sie liest die Systemzeit.
 - **Optimiert auch im Debug-Build:** `Cargo.toml` setzt `opt-level = 2` für Abhängigkeiten
@@ -57,3 +62,4 @@ src/
 - Unit-Tests in den Modulen; `cpu/tests.rs` mit flachem Testspeicher.
 - `tests/system.rs`: ganze Maschine mit Kassetten aus `tests/common` (`rom`, `serial_print`,
   `mooneye_pass`): HLE-Start, Timer, DMA, Boot-ROM, Debugger, Save-States.
+- `tests/render.rs`: Pixel des Framebuffers für Hintergrund, Scrollen, Objekte, Fenster.

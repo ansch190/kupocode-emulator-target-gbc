@@ -19,6 +19,7 @@ pub mod model;
 pub mod ppu;
 pub mod serial;
 pub mod timer;
+pub mod views;
 
 pub use gb::{Gb, TestResult};
 pub use model::Model;

@@ -280,3 +280,21 @@ fn call_ret_und_rst() {
     c.step(&mut ram);
     assert_eq!((c.pc, c.sp), (0x103, 0xD000));
 }
+
+#[test]
+fn ei_halt_kehrt_zum_halt_zurueck() {
+    // EI; HALT mit anstehender Unterbrechung: Rücksprung auf HALT (0x101).
+    let mut ram = Ram::new(&[0xFB, 0x76, 0x00]);
+    ram.mem[0xFFFF] = 0x01;
+    ram.if_ = 0x01;
+    let mut c = cpu();
+    c.step(&mut ram);
+    c.step(&mut ram);
+    assert_eq!(
+        c.step(&mut ram),
+        Step::Interrupt {
+            vector: 0x40,
+            return_pc: 0x101
+        }
+    );
+}

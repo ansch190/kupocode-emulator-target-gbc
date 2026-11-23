@@ -2,6 +2,8 @@
 
 #![allow(dead_code)]
 
+pub mod png;
+
 use kupocode_emulator_gbc::cart::header_checksum;
 
 /// 32-KB-Kassette ohne Mapper: Einsprung `0x100` springt nach `0x150`, dort steht `code`.

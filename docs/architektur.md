@@ -81,5 +81,11 @@ src/
 - `tests/system.rs`: ganze Maschine mit Kassetten aus `tests/common` (`rom`, `serial_print`,
   `mooneye_pass`): HLE-Start, Timer, DMA, Boot-ROM, Debugger, Save-States.
 - `tests/render.rs`: Pixel des Framebuffers für Hintergrund, Scrollen, Objekte, Fenster.
+- `tests/testroms.rs`: externe Testsuiten aus `KUPO_GB_TESTROMS` (Sammlung
+  `c-sp/game-boy-test-roms`): Blargg, Mooneye, acid2, Mealybug, SameSuite; Erfolg über
+  Fibonacci-Register, serielle Ausgabe oder Vergleich mit den PNG-Bildern (`tests/common/png.rs`).
+  Bekannte Abweichungen in `GB_OFFEN`, nur neue Fehler lassen den Test scheitern
+  (`KUPO_GB_OFFEN_AUSGEBEN=1` gibt die aktuelle Liste aus). `spiele_laufen_an` (`#[ignore]`) mit
+  `KUPO_GB_GAMES`, `geschwindigkeit` (`#[ignore]`, Release) verlangt zehnfache Echtzeit.
 - `tests/link.rs`: Bytetausch zweier Geräte, Bildaufbau, Save-States im Linkbetrieb.
 - `tests/cgb.rs`: Paletten, Attribute, Banken, GDMA/HDMA, Taktumschaltung, Kompatibilität.

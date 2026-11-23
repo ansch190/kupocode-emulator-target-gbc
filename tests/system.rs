@@ -168,3 +168,18 @@ fn super_game_boy_gibt_256_mal_224_aus() {
     gb.poke(0xFF00, &[0x30]).unwrap();
     assert_eq!(gb.bus.peek(0xFF00) & 0x0F, 0x0F);
 }
+
+/// Geschwindigkeit im Release-Build: mindestens zehnfache Echtzeit.
+#[test]
+#[ignore]
+fn geschwindigkeit() {
+    let mut gb = Gb::from_rom(&rom(&serial_print("Hallo Welt"), &[])).unwrap();
+    let start = std::time::Instant::now();
+    for _ in 0..600 {
+        gb.run_frame();
+    }
+    let secs = start.elapsed().as_secs_f64();
+    let factor = 10.05 / secs; // 600 Bilder ≈ 10,05 s Spielzeit
+    println!("{factor:.1}-fache Echtzeit");
+    assert!(factor >= 10.0, "{factor:.1}");
+}

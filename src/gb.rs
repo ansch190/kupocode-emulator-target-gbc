@@ -26,11 +26,15 @@ pub const STATE_VERSION: u32 = 1;
 /// Graustufen des DMG (Farbindex 0–3).
 const DMG_SHADES: [[u8; 3]; 4] = [[255, 255, 255], [170, 170, 170], [85, 85, 85], [0, 0, 0]];
 
-/// Graustufen für DMG-Spiele auf dem CGB (RGB555): Weiß, Hellgrau, Dunkelgrau, Schwarz.
+/// Paletten für DMG-Spiele auf dem CGB (RGB555, Farbe 0–3): die Standardwahl des CGB für
+/// Spiele ohne eigenen Eintrag (Hintergrund #FFFFFF #7BFF31 #0063C6 #000000, Objekte #FFFFFF
+/// #FF8484 #943939 #000000).
 ///
-/// Das CGB-Boot-ROM wählt hier Farben nach einer Tabelle über die Titel-Prüfsumme; diese
-/// Tabelle ist Teil des Boot-ROMs und nicht nachgebildet. Mit echtem Boot-ROM gilt dessen Wahl.
-const COMPAT_PALETTE: [u16; 4] = [0x7FFF, 0x56B5, 0x294A, 0x0000];
+/// Das CGB-Boot-ROM wählt für bekannte Titel andere Farben nach einer Tabelle über die
+/// Titel-Prüfsumme; diese Tabelle ist Teil des Boot-ROMs und nicht nachgebildet. Mit echtem
+/// Boot-ROM gilt dessen Wahl.
+const COMPAT_BG: [u16; 4] = [0x7FFF, 0x1BEF, 0x6180, 0x0000];
+const COMPAT_OBJ: [u16; 4] = [0x7FFF, 0x421F, 0x1CF2, 0x0000];
 
 /// RGB555 → RGB888 (lineare Skalierung, ohne LCD-Farbkorrektur).
 pub fn rgb555(c: u16) -> [u8; 3] {
@@ -64,6 +68,8 @@ pub struct Gb {
     tty: String,
     /// Mooneye-Ergebnis nach `LD B,B`.
     mooneye: Option<TestResult>,
+    /// `LD B,B` wurde ausgeführt (Endekennung vieler Test-ROMs).
+    ld_b_b: bool,
 }
 
 static REGISTERS: [RegisterInfo; 13] = {
@@ -131,6 +137,7 @@ impl Gb {
             call_stack: Vec::new(),
             tty: String::new(),
             mooneye: None,
+            ld_b_b: false,
         }
     }
 
@@ -237,21 +244,16 @@ impl Gb {
         }
         b.poke(0xFF26, if b.model.is_sgb() { 0xF0 } else { 0xF1 });
         if b.model.is_cgb() && self.rom.get(0x143).is_some_and(|&f| f & 0x80 == 0) {
-            // DMG-Spiel auf dem CGB: Kompatibilitätsmodus mit Graustufen-Paletten.
+            // DMG-Spiel auf dem CGB: Kompatibilitätsmodus mit den Standardpaletten.
             let c = &mut b.ppu.color;
             c.cgb_mode = false;
-            for (i, col) in COMPAT_PALETTE.iter().enumerate() {
-                let [lo, hi] = col.to_le_bytes();
-                // BG-Palette 0, Objektpaletten 0 und 1
-                for (pal, base) in [(0, 0), (1, 0), (1, 8)] {
-                    let target = if pal == 0 {
-                        &mut c.bg_pal
-                    } else {
-                        &mut c.obj_pal
-                    };
-                    target[base + i * 2] = lo;
-                    target[base + i * 2 + 1] = hi;
-                }
+            for i in 0..4 {
+                let [blo, bhi] = COMPAT_BG[i].to_le_bytes();
+                let [olo, ohi] = COMPAT_OBJ[i].to_le_bytes();
+                c.bg_pal[i * 2..i * 2 + 2].copy_from_slice(&[blo, bhi]);
+                // Objektpaletten 0 und 1
+                c.obj_pal[i * 2..i * 2 + 2].copy_from_slice(&[olo, ohi]);
+                c.obj_pal[8 + i * 2..8 + i * 2 + 2].copy_from_slice(&[olo, ohi]);
             }
         }
         b.poke(0xFF40, 0x91);
@@ -323,7 +325,10 @@ impl Gb {
                 self.stopped = Some(stop.clone());
                 return Some(stop);
             }
-            Step::Instruction { opcode: 0x40, .. } => self.check_mooneye(),
+            Step::Instruction { opcode: 0x40, .. } => {
+                self.ld_b_b = true;
+                self.check_mooneye();
+            }
             _ => {}
         }
         if let Some((addr, access)) = self.bus.watch_hit.take() {
@@ -421,6 +426,11 @@ impl Gb {
         let stop = self.step_with(&mut NoHook);
         self.refresh_tty();
         stop
+    }
+
+    /// Wurde seit der letzten Abfrage `LD B,B` ausgeführt?
+    pub fn take_ld_b_b(&mut self) -> bool {
+        std::mem::take(&mut self.ld_b_b)
     }
 
     /// Ist seit der letzten Abfrage ein Bild fertig geworden?

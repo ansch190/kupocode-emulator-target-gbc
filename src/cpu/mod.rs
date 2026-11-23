@@ -158,7 +158,13 @@ impl Cpu {
 
     /// Ablauf einer Unterbrechung: 2 Wartezyklen, PC sichern, Vektor laden (5 M-Zyklen).
     fn dispatch<B: CpuBus>(&mut self, bus: &mut B) -> Step {
-        let return_pc = self.pc;
+        // HALT-Fehler mit `EI` davor: Die Unterbrechung kehrt zum `HALT` selbst zurück.
+        let return_pc = if self.halt_bug {
+            self.halt_bug = false;
+            self.pc.wrapping_sub(1)
+        } else {
+            self.pc
+        };
         self.ime = false;
         bus.tick();
         bus.tick();

@@ -226,10 +226,21 @@ impl Ppu {
         if !self.enabled() {
             return false;
         }
-        (self.stat & 0x40 != 0 && self.ly == self.lyc)
+        // Beim Eintritt in den VBlank (Zeile 144, erste Punkte) wirkt auch die Mode-2-Quelle.
+        let vblank_start = self.ly == 144 && self.dot < 4;
+        (self.stat & 0x40 != 0 && self.visible_ly() == self.lyc)
             || (self.stat & 0x08 != 0 && self.mode == 0)
             || (self.stat & 0x10 != 0 && self.mode == 1)
-            || (self.stat & 0x20 != 0 && self.mode == 2)
+            || (self.stat & 0x20 != 0 && (self.mode == 2 || vblank_start))
+    }
+
+    /// `LY` aus Sicht der CPU: In Zeile 153 liest es sich ab dem 4. Punkt schon als 0.
+    fn visible_ly(&self) -> u8 {
+        if self.ly == 153 && self.dot >= 4 {
+            0
+        } else {
+            self.ly
+        }
     }
 
     /// Lässt die PPU `dots` Punkte laufen. Liefert die angeforderten Unterbrechungen.
@@ -547,12 +558,12 @@ impl Ppu {
         match addr {
             0xFF40 => self.lcdc,
             0xFF41 => {
-                let coinc = u8::from(self.enabled() && self.ly == self.lyc) << 2;
+                let coinc = u8::from(self.enabled() && self.visible_ly() == self.lyc) << 2;
                 0x80 | self.stat | coinc | self.mode
             }
             0xFF42 => self.scy,
             0xFF43 => self.scx,
-            0xFF44 => self.ly,
+            0xFF44 => self.visible_ly(),
             0xFF45 => self.lyc,
             0xFF47 => self.bgp,
             0xFF48 => self.obp0,

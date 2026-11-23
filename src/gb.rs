@@ -26,6 +26,21 @@ pub const STATE_VERSION: u32 = 1;
 /// Graustufen des DMG (Farbindex 0–3).
 const DMG_SHADES: [[u8; 3]; 4] = [[255, 255, 255], [170, 170, 170], [85, 85, 85], [0, 0, 0]];
 
+/// Graustufen für DMG-Spiele auf dem CGB (RGB555): Weiß, Hellgrau, Dunkelgrau, Schwarz.
+///
+/// Das CGB-Boot-ROM wählt hier Farben nach einer Tabelle über die Titel-Prüfsumme; diese
+/// Tabelle ist Teil des Boot-ROMs und nicht nachgebildet. Mit echtem Boot-ROM gilt dessen Wahl.
+const COMPAT_PALETTE: [u16; 4] = [0x7FFF, 0x56B5, 0x294A, 0x0000];
+
+/// RGB555 → RGB888 (lineare Skalierung, ohne LCD-Farbkorrektur).
+pub fn rgb555(c: u16) -> [u8; 3] {
+    let ch = |v: u16| {
+        let v = (v & 0x1F) as u8;
+        (v << 3) | (v >> 2)
+    };
+    [ch(c), ch(c >> 5), ch(c >> 10)]
+}
+
 /// Ergebnis eines Test-ROMs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TestResult {
@@ -220,6 +235,24 @@ impl Gb {
             b.poke(addr, v);
         }
         b.poke(0xFF26, if b.model.is_sgb() { 0xF0 } else { 0xF1 });
+        if b.model.is_cgb() && self.rom.get(0x143).is_some_and(|&f| f & 0x80 == 0) {
+            // DMG-Spiel auf dem CGB: Kompatibilitätsmodus mit Graustufen-Paletten.
+            let c = &mut b.ppu.color;
+            c.cgb_mode = false;
+            for (i, col) in COMPAT_PALETTE.iter().enumerate() {
+                let [lo, hi] = col.to_le_bytes();
+                // BG-Palette 0, Objektpaletten 0 und 1
+                for (pal, base) in [(0, 0), (1, 0), (1, 8)] {
+                    let target = if pal == 0 {
+                        &mut c.bg_pal
+                    } else {
+                        &mut c.obj_pal
+                    };
+                    target[base + i * 2] = lo;
+                    target[base + i * 2 + 1] = hi;
+                }
+            }
+        }
         b.poke(0xFF40, 0x91);
         b.poke(0xFF47, 0xFC);
         b.dma_reg = if b.model.is_cgb() { 0x00 } else { 0xFF };
@@ -350,11 +383,16 @@ impl Gb {
     }
 
     fn update_framebuffer(&mut self) {
+        let cgb = self.bus.ppu.color.cgb;
         for (i, &px) in self.bus.ppu.lines.iter().enumerate() {
             let x = i as u32 % WIDTH;
             let y = i as u32 / WIDTH;
-            self.framebuffer
-                .set_pixel(x, y, DMG_SHADES[usize::from(px & 3)]);
+            let rgb = if cgb {
+                rgb555(px)
+            } else {
+                DMG_SHADES[usize::from(px & 3)]
+            };
+            self.framebuffer.set_pixel(x, y, rgb);
         }
     }
 

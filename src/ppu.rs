@@ -45,6 +45,8 @@ struct ObjPixel {
     color: u8,
     /// Attribute des Objekts (Palette, Priorität).
     attr: u8,
+    /// Index in der OAM (Priorität im CGB-Modus).
+    index: u8,
 }
 
 /// Zustand des Hintergrund-Fetchers.
@@ -57,7 +59,48 @@ struct Fetcher {
     tile: u8,
     lo: u8,
     hi: u8,
+    /// CGB: Attribute der Kachel aus VRAM-Bank 1.
+    attr: u8,
     window: bool,
+}
+
+/// Farbzustand des CGB: Paletten-RAM und Betriebsart.
+#[derive(Debug, Clone)]
+pub struct ColorState {
+    /// Die Hardware ist ein CGB (auch im Kompatibilitätsmodus).
+    pub cgb: bool,
+    /// CGB-Funktionen sind an (CGB-Spiel); sonst DMG-Kompatibilitätsmodus.
+    pub cgb_mode: bool,
+    /// Hintergrund- und Objektpaletten: je 8 Paletten × 4 Farben × 2 Byte (RGB555, LE).
+    pub bg_pal: [u8; 64],
+    pub obj_pal: [u8; 64],
+    /// `BCPS`/`OCPS`: Index (Bits 0–5) und Auto-Inkrement (Bit 7).
+    pub bcps: u8,
+    pub ocps: u8,
+    /// `OPRI` Bit 0: 0 = Priorität nach OAM-Index, 1 = nach X (wie DMG).
+    pub opri: u8,
+}
+
+impl Default for ColorState {
+    fn default() -> Self {
+        Self {
+            cgb: false,
+            cgb_mode: false,
+            bg_pal: [0xFF; 64],
+            obj_pal: [0xFF; 64],
+            bcps: 0,
+            ocps: 0,
+            opri: 0,
+        }
+    }
+}
+
+impl ColorState {
+    /// Farbe `index` der Palette `palette` als RGB555.
+    pub fn color(pal: &[u8; 64], palette: u8, index: u8) -> u16 {
+        let i = usize::from(palette) * 8 + usize::from(index) * 2;
+        u16::from_le_bytes([pal[i], pal[i + 1]]) & 0x7FFF
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -106,7 +149,11 @@ pub struct Ppu {
     window_line: u8,
     wy_triggered: bool,
     window_on_line: bool,
-    /// Bild als Farben je Pixel (DMG: Graustufe 0–3).
+    /// Farben und Betriebsart des CGB.
+    pub color: ColorState,
+    /// Mode 0 einer sichtbaren Zeile hat begonnen (Auslöser der HBlank-DMA).
+    pub hblank: bool,
+    /// Bild als Farben je Pixel (DMG: Graustufe 0–3, CGB: RGB555).
     pub lines: Vec<u16>,
 }
 
@@ -144,6 +191,8 @@ impl Default for Ppu {
             window_line: 0,
             wy_triggered: false,
             window_on_line: false,
+            color: ColorState::default(),
+            hblank: false,
             lines: vec![0; (WIDTH * HEIGHT) as usize],
         }
     }
@@ -309,15 +358,26 @@ impl Ppu {
                     let y = self.scy.wrapping_add(self.ly);
                     (map, (self.scx / 8).wrapping_add(f.x) & 31, y / 8)
                 };
-                self.fetcher.tile = self.vram[map + usize::from(row) * 32 + usize::from(col)];
+                let i = map + usize::from(row) * 32 + usize::from(col);
+                self.fetcher.tile = self.vram[i];
+                self.fetcher.attr = if self.color.cgb_mode {
+                    self.vram[0x2000 + i]
+                } else {
+                    0
+                };
             }
             3 | 5 => {
-                let row = if f.window {
+                let mut row = if f.window {
                     self.window_line & 7
                 } else {
                     self.scy.wrapping_add(self.ly) & 7
                 };
-                let v = self.vram[self.tile_row_addr(f.tile, row) + usize::from(f.step == 5)];
+                if f.attr & 0x40 != 0 {
+                    row = 7 - row;
+                }
+                let bank = if f.attr & 0x08 != 0 { 0x2000 } else { 0 };
+                let v =
+                    self.vram[bank + self.tile_row_addr(f.tile, row) + usize::from(f.step == 5)];
                 if f.step == 3 {
                     self.fetcher.lo = v;
                 } else {
@@ -326,9 +386,12 @@ impl Ppu {
             }
             6 => {
                 if self.bg_fifo.is_empty() {
-                    for bit in (0..8).rev() {
+                    // Eintrag: Farbe (Bits 0–1), Palette (2–4), BG-Priorität (5).
+                    let extra = (f.attr & 7) << 2 | (f.attr & 0x80) >> 2;
+                    for p in 0..8 {
+                        let bit = if f.attr & 0x20 != 0 { p } else { 7 - p };
                         let c = ((f.hi >> bit) & 1) << 1 | ((f.lo >> bit) & 1);
-                        self.bg_fifo.push_back(c);
+                        self.bg_fifo.push_back(c | extra);
                     }
                     self.fetcher.x = f.x.wrapping_add(1);
                     self.fetcher.step = 0;
@@ -348,17 +411,24 @@ impl Ppu {
             row = h - 1 - row;
         }
         let tile = if h == 16 { s.tile & 0xFE } else { s.tile };
-        let addr = usize::from(tile) * 16 + usize::from(row) * 2;
+        let bank = if self.color.cgb_mode && s.attr & 0x08 != 0 {
+            0x2000
+        } else {
+            0
+        };
+        let addr = bank + usize::from(tile) * 16 + usize::from(row) * 2;
+        let by_index = self.color.cgb_mode && self.color.opri & 1 == 0;
         let (lo, hi) = (self.vram[addr], self.vram[addr + 1]);
         let skip = (self.lx + 8).saturating_sub(s.x);
         for p in skip..8 {
             let bit = if s.attr & 0x20 != 0 { p } else { 7 - p };
             let color = ((hi >> bit) & 1) << 1 | ((lo >> bit) & 1);
             let slot = &mut self.obj_fifo[usize::from(p - skip)];
-            if slot.color == 0 {
+            if color != 0 && (slot.color == 0 || (by_index && s.index < slot.index)) {
                 *slot = ObjPixel {
                     color,
                     attr: s.attr,
+                    index: s.index,
                 };
             }
         }
@@ -422,29 +492,49 @@ impl Ppu {
     }
 
     fn output_pixel(&mut self) {
-        let bg = self.bg_fifo.pop_front().unwrap_or(0);
+        let entry = self.bg_fifo.pop_front().unwrap_or(0);
         let obj = self.obj_fifo[0];
         self.obj_fifo.copy_within(1.., 0);
         self.obj_fifo[7] = ObjPixel::default();
-        let bg = if self.lcdc & 0x01 != 0 { bg } else { 0 };
-        let shade = if obj.color != 0 && self.lcdc & 0x02 != 0 && !(obj.attr & 0x80 != 0 && bg != 0)
-        {
-            let pal = if obj.attr & 0x10 != 0 {
-                self.obp1
+        let bg = entry & 3;
+        let objects_on = self.lcdc & 0x02 != 0;
+        let value = if self.color.cgb_mode {
+            // LCDC Bit 0 = Hauptpriorität: aus → Objekte immer vorn.
+            let bg_wins =
+                self.lcdc & 0x01 != 0 && bg != 0 && (entry & 0x20 != 0 || obj.attr & 0x80 != 0);
+            if obj.color != 0 && objects_on && !bg_wins {
+                ColorState::color(&self.color.obj_pal, obj.attr & 7, obj.color)
             } else {
-                self.obp0
-            };
-            (pal >> (obj.color * 2)) & 3
+                ColorState::color(&self.color.bg_pal, (entry >> 2) & 7, bg)
+            }
         } else {
-            (self.bgp >> (bg * 2)) & 3
+            let bg = if self.lcdc & 0x01 != 0 { bg } else { 0 };
+            let (shade, obj_pal) =
+                if obj.color != 0 && objects_on && !(obj.attr & 0x80 != 0 && bg != 0) {
+                    let one = obj.attr & 0x10 != 0;
+                    let pal = if one { self.obp1 } else { self.obp0 };
+                    ((pal >> (obj.color * 2)) & 3, Some(u8::from(one)))
+                } else {
+                    ((self.bgp >> (bg * 2)) & 3, None)
+                };
+            if self.color.cgb {
+                // Kompatibilitätsmodus: Graustufe über die beim Start gesetzten CGB-Paletten.
+                match obj_pal {
+                    Some(p) => ColorState::color(&self.color.obj_pal, p, shade),
+                    None => ColorState::color(&self.color.bg_pal, 0, shade),
+                }
+            } else {
+                u16::from(shade)
+            }
         };
         if !self.blank_frame {
             let i = usize::from(self.ly) * WIDTH as usize + usize::from(self.lx);
-            self.lines[i] = u16::from(shade);
+            self.lines[i] = value;
         }
         self.lx += 1;
         if self.lx == WIDTH as u8 {
             self.mode = 0;
+            self.hblank = true;
         }
     }
 
@@ -469,7 +559,31 @@ impl Ppu {
             0xFF49 => self.obp1,
             0xFF4A => self.wy,
             0xFF4B => self.wx,
+            0xFF68 if self.color.cgb => self.color.bcps | 0x40,
+            0xFF6A if self.color.cgb => self.color.ocps | 0x40,
+            0xFF69 | 0xFF6B if self.color.cgb && self.mode == 3 => 0xFF,
+            0xFF69 if self.color.cgb => self.color.bg_pal[usize::from(self.color.bcps & 0x3F)],
+            0xFF6B if self.color.cgb => self.color.obj_pal[usize::from(self.color.ocps & 0x3F)],
+            0xFF6C if self.color.cgb => 0xFE | self.color.opri,
             _ => 0xFF,
+        }
+    }
+
+    /// Schreibt Paletten-RAM über ein Daten-Register (Index mit Auto-Inkrement).
+    fn write_palette(&mut self, obj: bool, v: u8) {
+        let writable = self.mode != 3 && self.color.cgb_mode;
+        let c = &mut self.color;
+        let (spec, pal) = if obj {
+            (&mut c.ocps, &mut c.obj_pal)
+        } else {
+            (&mut c.bcps, &mut c.bg_pal)
+        };
+        // In Mode 3 und im Kompatibilitätsmodus ist das Paletten-RAM gesperrt.
+        if writable {
+            pal[usize::from(*spec & 0x3F)] = v;
+        }
+        if *spec & 0x80 != 0 {
+            *spec = 0x80 | (spec.wrapping_add(1) & 0x3F);
         }
     }
 
@@ -503,6 +617,11 @@ impl Ppu {
             0xFF49 => self.obp1 = v,
             0xFF4A => self.wy = v,
             0xFF4B => self.wx = v,
+            0xFF68 if self.color.cgb => self.color.bcps = v & 0xBF,
+            0xFF6A if self.color.cgb => self.color.ocps = v & 0xBF,
+            0xFF69 if self.color.cgb => self.write_palette(false, v),
+            0xFF6B if self.color.cgb => self.write_palette(true, v),
+            0xFF6C if self.color.cgb && self.color.cgb_mode => self.color.opri = v & 1,
             _ => {}
         }
     }
@@ -557,12 +676,23 @@ impl Ppu {
         for p in &self.obj_fifo {
             w.u8(p.color);
             w.u8(p.attr);
+            w.u8(p.index);
         }
         let f = &self.fetcher;
         for v in [f.step, f.x, f.tile, f.lo, f.hi] {
             w.u8(v);
         }
+        w.u8(f.attr);
         w.bool(f.window);
+        let c = &self.color;
+        w.bool(c.cgb);
+        w.bool(c.cgb_mode);
+        w.bytes(&c.bg_pal);
+        w.bytes(&c.obj_pal);
+        for v in [c.bcps, c.ocps, c.opri] {
+            w.u8(v);
+        }
+        w.bool(self.hblank);
         w.option(self.sprite_fetch.as_ref(), |w, &(i, l, wt)| {
             w.u8(i);
             w.u8(l);
@@ -627,12 +757,23 @@ impl Ppu {
         for p in &mut self.obj_fifo {
             p.color = r.u8()?;
             p.attr = r.u8()?;
+            p.index = r.u8()?;
         }
         let f = &mut self.fetcher;
         for v in [&mut f.step, &mut f.x, &mut f.tile, &mut f.lo, &mut f.hi] {
             *v = r.u8()?;
         }
+        f.attr = r.u8()?;
         f.window = r.bool()?;
+        let c = &mut self.color;
+        c.cgb = r.bool()?;
+        c.cgb_mode = r.bool()?;
+        r.bytes_into(&mut c.bg_pal)?;
+        r.bytes_into(&mut c.obj_pal)?;
+        c.bcps = r.u8()?;
+        c.ocps = r.u8()?;
+        c.opri = r.u8()?;
+        self.hblank = r.bool()?;
         self.sprite_fetch = r.option(|r| Ok((r.u8()?, r.u8()?, r.u8()?)))?;
         self.lines = r.u16_vec()?;
         Ok(())

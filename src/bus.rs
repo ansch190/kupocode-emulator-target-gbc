@@ -19,6 +19,26 @@ pub const IRQ_TIMER: u8 = 0x04;
 pub const IRQ_SERIAL: u8 = 0x08;
 pub const IRQ_JOYPAD: u8 = 0x10;
 
+/// Register des CGB außerhalb der PPU.
+#[derive(Debug, Clone, Default)]
+pub struct CgbRegs {
+    /// Doppelter Takt aktiv (`KEY1` Bit 7).
+    pub double_speed: bool,
+    /// Umschaltung vorbereitet (`KEY1` Bit 0), ausgeführt mit `STOP`.
+    pub key1_armed: bool,
+    pub hdma_src: u16,
+    pub hdma_dst: u16,
+    /// Verbleibende 16-Byte-Blöcke der HBlank-DMA.
+    pub hdma_blocks: u8,
+    pub hdma_active: bool,
+    /// Wert von `HDMA5` nach Ende oder Abbruch.
+    pub hdma5: u8,
+    /// Infrarot-Schnittstelle `RP` (Bits 0, 6, 7).
+    pub rp: u8,
+    /// Undokumentierte Register `FF72`–`FF75`.
+    pub undoc: [u8; 4],
+}
+
 pub struct Bus {
     pub model: Model,
     pub cart: Option<Box<dyn Mapper>>,
@@ -42,6 +62,7 @@ pub struct Bus {
     pub dma_delay: u8,
     /// Eingeblendetes Boot-ROM.
     pub boot_rom: Option<Vec<u8>>,
+    pub cgb: CgbRegs,
     /// T-Zyklen seit dem Einschalten.
     pub cycles: u64,
     pub breakpoints: Breakpoints,
@@ -53,6 +74,9 @@ impl Bus {
     pub fn new(model: Model, cart: Option<Box<dyn Mapper>>) -> Self {
         let mut serial = Serial::default();
         serial.cgb = model.is_cgb();
+        let mut ppu = Ppu::default();
+        ppu.color.cgb = model.is_cgb();
+        ppu.color.cgb_mode = model.is_cgb();
         Self {
             model,
             cart,
@@ -64,16 +88,25 @@ impl Bus {
             timer: Timer::default(),
             serial,
             joypad: Joypad::default(),
-            ppu: Ppu::default(),
+            ppu,
             apu_regs: [0; 0x30],
             dma_reg: 0,
             dma_index: None,
             dma_delay: 0,
             boot_rom: None,
+            cgb: CgbRegs {
+                hdma5: 0xFF,
+                ..CgbRegs::default()
+            },
             cycles: 0,
             breakpoints: Breakpoints::with_mask(0xFFFF),
             watch_hit: None,
         }
+    }
+
+    /// CGB-Funktionen aktiv (CGB-Spiel auf CGB)?
+    pub fn cgb_mode(&self) -> bool {
+        self.ppu.color.cgb_mode
     }
 
     fn wram_index(&self, addr: u16) -> usize {
@@ -113,8 +146,24 @@ impl Bus {
             0xFF10..=0xFF3F => self.apu_regs[usize::from(addr - 0xFF10)],
             0xFF46 => self.dma_reg,
             0xFF40..=0xFF4B => self.ppu.read(addr),
-            0xFF4F if self.model.is_cgb() => 0xFE | self.ppu.vram_bank,
-            0xFF70 if self.model.is_cgb() => 0xF8 | self.wram_bank,
+            0xFF4D if self.cgb_mode() => {
+                0x7E | u8::from(self.cgb.double_speed) << 7 | u8::from(self.cgb.key1_armed)
+            }
+            0xFF4F if self.cgb_mode() => 0xFE | self.ppu.vram_bank,
+            0xFF55 if self.cgb_mode() => {
+                if self.cgb.hdma_active {
+                    self.cgb.hdma_blocks.wrapping_sub(1) & 0x7F
+                } else {
+                    self.cgb.hdma5
+                }
+            }
+            0xFF56 if self.model.is_cgb() => self.cgb.rp | 0x3E,
+            0xFF68..=0xFF6C => self.ppu.read(addr),
+            0xFF70 if self.cgb_mode() => 0xF8 | self.wram_bank,
+            0xFF72 | 0xFF73 if self.model.is_cgb() => self.cgb.undoc[usize::from(addr - 0xFF72)],
+            0xFF74 if self.cgb_mode() => self.cgb.undoc[2],
+            0xFF75 if self.model.is_cgb() => self.cgb.undoc[3] | 0x8F,
+            0xFF76 | 0xFF77 if self.model.is_cgb() => 0x00,
             0xFF80..=0xFFFE => self.hram[usize::from(addr - 0xFF80)],
             0xFFFF => self.ie,
             _ => 0xFF,
@@ -148,22 +197,109 @@ impl Bus {
                 self.dma_delay = 2;
             }
             0xFF40..=0xFF4B => self.ppu.write(addr, v),
-            0xFF4F if self.model.is_cgb() => self.ppu.vram_bank = v & 1,
+            0xFF4C if self.boot_rom.is_some() && self.model.is_cgb() => {
+                // KEY0: Das Boot-ROM schaltet DMG-Spiele in den Kompatibilitätsmodus.
+                self.ppu.color.cgb_mode = v & 0x04 == 0;
+            }
+            0xFF4D if self.cgb_mode() => self.cgb.key1_armed = v & 1 != 0,
+            0xFF4F if self.cgb_mode() => self.ppu.vram_bank = v & 1,
+            0xFF51 if self.cgb_mode() => {
+                self.cgb.hdma_src = (self.cgb.hdma_src & 0x00F0) | u16::from(v) << 8
+            }
+            0xFF52 if self.cgb_mode() => {
+                self.cgb.hdma_src = (self.cgb.hdma_src & 0xFF00) | u16::from(v & 0xF0)
+            }
+            0xFF53 if self.cgb_mode() => {
+                self.cgb.hdma_dst = (self.cgb.hdma_dst & 0x00F0) | u16::from(v & 0x1F) << 8
+            }
+            0xFF54 if self.cgb_mode() => {
+                self.cgb.hdma_dst = (self.cgb.hdma_dst & 0x1F00) | u16::from(v & 0xF0)
+            }
+            0xFF55 if self.cgb_mode() => self.write_hdma5(v),
+            0xFF56 if self.model.is_cgb() => self.cgb.rp = v & 0xC1,
+            0xFF68..=0xFF6C => self.ppu.write(addr, v),
+            0xFF72 | 0xFF73 if self.model.is_cgb() => {
+                self.cgb.undoc[usize::from(addr - 0xFF72)] = v
+            }
+            0xFF74 if self.cgb_mode() => self.cgb.undoc[2] = v,
+            0xFF75 if self.model.is_cgb() => self.cgb.undoc[3] = v & 0x70,
             0xFF50 => {
                 if v != 0 {
                     self.boot_rom = None;
                 }
             }
-            0xFF70 if self.model.is_cgb() => self.wram_bank = v & 7,
+            0xFF70 if self.cgb_mode() => self.wram_bank = v & 7,
             0xFF80..=0xFFFE => self.hram[usize::from(addr - 0xFF80)] = v,
             0xFFFF => self.ie = v,
             _ => {}
         }
     }
 
-    /// Ein M-Zyklus der Peripherie.
+    /// `HDMA5`: Bit 7 = 0 startet eine allgemeine DMA (sofort, CPU steht) bzw. bricht eine
+    /// laufende HBlank-DMA ab; Bit 7 = 1 startet eine HBlank-DMA.
+    fn write_hdma5(&mut self, v: u8) {
+        let blocks = (v & 0x7F) + 1;
+        if self.cgb.hdma_active && v & 0x80 == 0 {
+            self.cgb.hdma_active = false;
+            self.cgb.hdma5 = 0x80 | (self.cgb.hdma_blocks.wrapping_sub(1) & 0x7F);
+            return;
+        }
+        self.cgb.hdma_blocks = blocks;
+        if v & 0x80 != 0 {
+            self.cgb.hdma_active = true;
+            // Im HBlank oder bei ausgeschaltetem LCD wird sofort ein Block übertragen.
+            if !self.ppu.enabled() || self.ppu.mode() == 0 {
+                self.hdma_block();
+            }
+        } else {
+            while self.cgb.hdma_blocks > 0 {
+                self.copy_block();
+            }
+            self.cgb.hdma5 = 0xFF;
+        }
+    }
+
+    /// Überträgt 16 Bytes; die CPU steht dabei 8 M-Zyklen (bei doppeltem Takt 16).
+    fn copy_block(&mut self) {
+        for i in 0..16u16 {
+            let v = self.peek(self.cgb.hdma_src.wrapping_add(i));
+            let dst = 0x8000 | (self.cgb.hdma_dst.wrapping_add(i) & 0x1FFF);
+            let idx = self.ppu.vram_index(dst);
+            self.ppu.vram[idx] = v;
+        }
+        self.cgb.hdma_src = self.cgb.hdma_src.wrapping_add(16);
+        self.cgb.hdma_dst = (self.cgb.hdma_dst + 16) & 0x1FF0;
+        self.cgb.hdma_blocks -= 1;
+        let stall = if self.cgb.double_speed { 16 } else { 8 };
+        for _ in 0..stall {
+            self.tick_hardware();
+        }
+    }
+
+    fn hdma_block(&mut self) {
+        self.copy_block();
+        if self.cgb.hdma_blocks == 0 {
+            self.cgb.hdma_active = false;
+            self.cgb.hdma5 = 0xFF;
+        }
+    }
+
+    /// Ein M-Zyklus der Peripherie samt HBlank-DMA.
     fn step_peripherals(&mut self) {
-        self.cycles += 4;
+        self.tick_hardware();
+        if self.ppu.hblank {
+            self.ppu.hblank = false;
+            if self.cgb.hdma_active {
+                self.hdma_block();
+            }
+        }
+    }
+
+    /// Ein M-Zyklus der Peripherie. Timer und Serielle laufen im CPU-Takt, PPU und Uhr der
+    /// Kassette im Grundtakt (bei doppeltem Takt also 2 Punkte je M-Zyklus).
+    fn tick_hardware(&mut self) {
+        let dots = if self.cgb.double_speed { 2 } else { 4 };
+        self.cycles += u64::from(dots);
         let old = self.timer.counter;
         if self.timer.tick() {
             self.if_ |= IRQ_TIMER;
@@ -174,9 +310,9 @@ impl Bus {
         if self.joypad.tick() {
             self.if_ |= IRQ_JOYPAD;
         }
-        self.if_ |= self.ppu.tick(4);
+        self.if_ |= self.ppu.tick(dots);
         if let Some(c) = self.cart.as_mut() {
-            c.tick(4);
+            c.tick(dots);
         }
         self.step_dma();
     }
@@ -232,6 +368,16 @@ impl Bus {
         w.option(self.dma_index.as_ref(), |w, &i| w.u8(i));
         w.u8(self.dma_delay);
         w.bool(self.boot_rom.is_some());
+        let c = &self.cgb;
+        w.bool(c.double_speed);
+        w.bool(c.key1_armed);
+        w.u16(c.hdma_src);
+        w.u16(c.hdma_dst);
+        w.u8(c.hdma_blocks);
+        w.bool(c.hdma_active);
+        w.u8(c.hdma5);
+        w.u8(c.rp);
+        w.bytes(&c.undoc);
         w.u64(self.cycles);
         if let Some(c) = &self.cart {
             c.save_state(w);
@@ -259,6 +405,16 @@ impl Bus {
         if !r.bool()? {
             self.boot_rom = None;
         }
+        let c = &mut self.cgb;
+        c.double_speed = r.bool()?;
+        c.key1_armed = r.bool()?;
+        c.hdma_src = r.u16()?;
+        c.hdma_dst = r.u16()?;
+        c.hdma_blocks = r.u8()?;
+        c.hdma_active = r.bool()?;
+        c.hdma5 = r.u8()?;
+        c.rp = r.u8()?;
+        r.bytes_into(&mut c.undoc)?;
         self.cycles = r.u64()?;
         if let Some(c) = &mut self.cart {
             c.load_state(r)?;
@@ -296,5 +452,18 @@ impl CpuBus for Bus {
 
     fn acknowledge(&mut self, bit: u8) {
         self.if_ &= !(1 << bit);
+    }
+
+    /// `STOP`: Auf dem CGB mit vorbereitetem `KEY1` wird der Takt umgeschaltet. Die CPU steht
+    /// dabei 2050 M-Zyklen; `DIV` wird zurückgesetzt.
+    fn stop(&mut self) {
+        if self.cgb_mode() && self.cgb.key1_armed {
+            self.cgb.key1_armed = false;
+            self.cgb.double_speed = !self.cgb.double_speed;
+            self.timer.counter = 0;
+            for _ in 0..2050 {
+                self.tick_hardware();
+            }
+        }
     }
 }

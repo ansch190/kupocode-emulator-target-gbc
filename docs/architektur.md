@@ -18,12 +18,14 @@ src/
   main.rs         CLI `kupocode-emulator-gbc` (run, test, disasm)
   gb.rs           `Gb`: Machine, DebugTarget, SaveState (`KGBC`); HLE-Start, Test-Erkennung
   model.rs        `Model` (Dmg, Cgb, Sgb, Sgb2), Wahl nach dem Kassettenkopf
-  bus.rs          `Bus`: Adressraum, I/O, OAM-DMA, Boot-ROM, Watchpoints; taktet die Peripherie
+  bus.rs          `Bus`: Adressraum, I/O, OAM-DMA, Boot-ROM, Watchpoints; taktet die Peripherie;
+                  `CgbRegs` (KEY1/Doppeltakt, HDMA/GDMA, RP, FF72–FF75)
   timer.rs        `Timer`: Systemzähler/DIV, TIMA mit Flanken- und Ladeverhalten
   serial.rs       `Serial`: SB/SC, Ausgabe für Testprogramme
   joypad.rs       `Joypad`: P1, Tastenzuordnung, Unterbrechung
-  ppu.rs          `Ppu`: Zeilen und Modi, LY/STAT, OAM-Suche, Fetcher und Pixel-FIFOs
-  views.rs        Debug-Ansichten: Kacheln, Kachelkarten, OAM
+  ppu.rs          `Ppu`: Zeilen und Modi, LY/STAT, OAM-Suche, Fetcher und Pixel-FIFOs;
+                  `ColorState` (CGB-Paletten, CGB-Modus oder Kompatibilitätsmodus)
+  views.rs        Debug-Ansichten: Kacheln, Kachelkarten, OAM, CGB-Paletten
   cart/           `CartridgeInfo` (Kopf, Typen), `trait Mapper`, `Memory` (ROM/RAM mit Banken)
     rom_only.rs mbc1.rs (mit MBC1M) mbc2.rs mbc3.rs (mit MBC30) mbc5.rs (mit Rumble)
     rtc.rs        `Rtc`: Uhr des MBC3, Latch, 48-Byte-Anhang (BGB/VBA)
@@ -52,6 +54,10 @@ src/
   Fensterstart und Objektabrufen. Die Tests in `ppu.rs` sichern 172/175/178/183 Punkte ab.
 - **Gesperrte Zugriffe:** Der Bus liefert VRAM in Mode 3 und OAM in Mode 2/3 sowie während der
   DMA als `$FF` und verwirft Schreibzugriffe; `peek`/`poke` des Debuggers sind nicht gesperrt.
+- **Takte beim CGB:** Timer und Serielle zählen CPU-Takte, PPU und Kassettenuhr den Grundtakt.
+  Bei doppeltem Takt läuft die PPU 2 Punkte je M-Zyklus; `Bus::cycles` zählt den Grundtakt.
+- **CGB-Modus vs. Kompatibilität:** `ppu.color.cgb` = Hardware ist ein CGB, `cgb_mode` = CGB-
+  Funktionen an. Register wie VBK, SVBK, KEY1 und HDMA prüfen `cgb_mode`.
 - **Uhr der Kassette:** zählt emulierte Takte (`Mapper::tick`); die Zeit zwischen zwei
   Spielsitzungen stellt die GUI mit `advance_rtc` nach. Nur sie liest die Systemzeit.
 - **Optimiert auch im Debug-Build:** `Cargo.toml` setzt `opt-level = 2` für Abhängigkeiten
@@ -63,3 +69,4 @@ src/
 - `tests/system.rs`: ganze Maschine mit Kassetten aus `tests/common` (`rom`, `serial_print`,
   `mooneye_pass`): HLE-Start, Timer, DMA, Boot-ROM, Debugger, Save-States.
 - `tests/render.rs`: Pixel des Framebuffers für Hintergrund, Scrollen, Objekte, Fenster.
+- `tests/cgb.rs`: Paletten, Attribute, Banken, GDMA/HDMA, Taktumschaltung, Kompatibilität.

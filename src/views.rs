@@ -3,7 +3,7 @@
 use kupocode_emulator_core::debug::GraphicsView;
 use kupocode_emulator_core::video::FrameBuffer;
 
-use crate::ppu::Ppu;
+use crate::ppu::{ColorState, Ppu};
 
 /// Graustufen für Farbindizes (DMG-Paletten angewendet).
 const SHADES: [[u8; 3]; 4] = [[255, 255, 255], [170, 170, 170], [85, 85, 85], [0, 0, 0]];
@@ -104,7 +104,43 @@ fn oam(ppu: &Ppu) -> GraphicsView {
     }
 }
 
-/// Alle Ansichten; `cgb` ergänzt die zweite VRAM-Bank.
+/// CGB-Paletten: 8 Hintergrund- und 8 Objektpaletten à 4 Farben als Felder (16 × 16 Pixel).
+fn palettes(ppu: &Ppu) -> GraphicsView {
+    let mut img = FrameBuffer::new(64, 256);
+    let mut rows = Vec::new();
+    for (kind, pal) in [("BG", &ppu.color.bg_pal), ("OBJ", &ppu.color.obj_pal)] {
+        for p in 0..8u8 {
+            let colors: Vec<u16> = (0..4).map(|c| ColorState::color(pal, p, c)).collect();
+            rows.push(format!(
+                "{kind}{p}: {}",
+                colors
+                    .iter()
+                    .map(|c| format!("${c:04X}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+            let row = if kind == "BG" { p } else { p + 8 };
+            for (c, &col) in colors.iter().enumerate() {
+                for y in 0..16 {
+                    for x in 0..16 {
+                        img.set_pixel(
+                            c as u32 * 16 + x,
+                            u32::from(row) * 16 + y,
+                            crate::gb::rgb555(col),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    GraphicsView {
+        name: "Paletten".into(),
+        image: img,
+        rows,
+    }
+}
+
+/// Alle Ansichten; `cgb` ergänzt die zweite VRAM-Bank und die Paletten.
 pub fn views(ppu: &Ppu, cgb: bool) -> Vec<GraphicsView> {
     let mut v = vec![tiles(ppu, 0)];
     if cgb {
@@ -113,5 +149,8 @@ pub fn views(ppu: &Ppu, cgb: bool) -> Vec<GraphicsView> {
     v.push(tilemap(ppu, "Karte 0", 0x1800));
     v.push(tilemap(ppu, "Karte 1", 0x1C00));
     v.push(oam(ppu));
+    if cgb {
+        v.push(palettes(ppu));
+    }
     v
 }

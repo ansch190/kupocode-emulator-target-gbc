@@ -1,8 +1,12 @@
-//! Serielle Schnittstelle (`SB`, `SC`).
+//! Serielle Schnittstelle (`SB`, `SC`) samt Linkkabel.
 //!
 //! Mit internem Takt schiebt sie ein Bit je fallender Flanke von Bit 8 des Systemzählers
 //! (8192 Hz), im schnellen CGB-Modus von Bit 3. Ohne Gegenstelle kommen Einsen herein. Gesendete
 //! Bytes landen zusätzlich in [`Serial::output`] (Testausgabe von Blargg).
+//!
+//! **Linkkabel:** Mit Gegenstelle (`peer`) kommt beim Schieben deren oberstes Bit herein; das
+//! eigene oberste Bit wird als Taktimpuls in `pulses` abgelegt. [`crate::link::GbLink`] gibt die
+//! Impulse nach jedem Schritt an die Gegenstelle weiter, die mit externem Takt mitschiebt.
 
 use kupocode_emulator_core::state::{StateError, StateReader, StateWriter};
 
@@ -18,6 +22,10 @@ pub struct Serial {
     pub output: Vec<u8>,
     /// CGB: schneller Takt (`SC` Bit 1) verfügbar.
     pub cgb: bool,
+    /// Oberstes Bit von `SB` der Gegenstelle; `None` = kein Kabel.
+    pub peer: Option<bool>,
+    /// Mit internem Takt gesendete Bits, die die Gegenstelle noch übernehmen muss.
+    pub pulses: Vec<bool>,
 }
 
 impl Serial {
@@ -34,17 +42,33 @@ impl Serial {
             self.sb = v;
         } else {
             self.sc = v & if self.cgb { 0x83 } else { 0x81 };
-            if v & 0x81 == 0x81 {
+            if v & 0x80 != 0 {
                 self.bits_left = 8;
                 self.sending = self.sb;
             }
         }
     }
 
+    /// Ausgabe-Leitung: oberstes Bit von `SB`.
+    pub fn out_bit(&self) -> bool {
+        self.sb & 0x80 != 0
+    }
+
+    fn shift(&mut self, input: bool) -> bool {
+        self.sb = (self.sb << 1) | u8::from(input);
+        self.bits_left -= 1;
+        if self.bits_left == 0 {
+            self.sc &= 0x7F;
+            self.output.push(self.sending);
+            return true;
+        }
+        false
+    }
+
     /// Ein M-Zyklus; `old`/`new` sind der Systemzähler davor und danach. Liefert `true` am Ende
     /// einer Übertragung (Unterbrechung).
     pub fn tick(&mut self, old: u16, new: u16) -> bool {
-        if self.bits_left == 0 || self.sc & 0x01 == 0 {
+        if self.bits_left == 0 || self.sc & 0x81 != 0x81 {
             return false;
         }
         let bit = if self.cgb && self.sc & 0x02 != 0 {
@@ -55,14 +79,20 @@ impl Serial {
         if old & (1 << bit) == 0 || new & (1 << bit) != 0 {
             return false;
         }
-        self.sb = (self.sb << 1) | 1;
-        self.bits_left -= 1;
-        if self.bits_left == 0 {
-            self.sc &= 0x7F;
-            self.output.push(self.sending);
-            return true;
+        if self.peer.is_some() {
+            self.pulses.push(self.out_bit());
         }
-        false
+        let input = self.peer.unwrap_or(true);
+        self.shift(input)
+    }
+
+    /// Taktimpuls der Gegenstelle (externer Takt) mit deren Bit. Liefert `true` am Ende einer
+    /// Übertragung.
+    pub fn external_pulse(&mut self, bit: bool) -> bool {
+        if self.bits_left == 0 || self.sc & 0x81 != 0x80 {
+            return false;
+        }
+        self.shift(bit)
     }
 
     pub fn save_state(&self, w: &mut StateWriter) {
@@ -79,6 +109,7 @@ impl Serial {
         self.bits_left = r.u8()?;
         self.sending = r.u8()?;
         self.output = r.blob()?;
+        self.pulses.clear();
         Ok(())
     }
 }

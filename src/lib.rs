@@ -16,6 +16,7 @@ pub mod disasm;
 pub mod gb;
 pub mod hook;
 pub mod joypad;
+pub mod link;
 pub mod model;
 pub mod ppu;
 pub mod serial;
@@ -24,4 +25,5 @@ pub mod timer;
 pub mod views;
 
 pub use gb::{Gb, TestResult};
+pub use link::GbLink;
 pub use model::Model;

@@ -22,7 +22,8 @@ src/
                   `CgbRegs` (KEY1/Doppeltakt, HDMA/GDMA, RP, FF72–FF75)
   timer.rs        `Timer`: Systemzähler/DIV, TIMA mit Flanken- und Ladeverhalten
   apu.rs          `Apu`: vier Kanäle, Frame-Sequencer, Mischung, Hochpass, 44,1 kHz
-  serial.rs       `Serial`: SB/SC, Ausgabe für Testprogramme
+  serial.rs       `Serial`: SB/SC, interner/externer Takt, Ausgabe für Testprogramme
+  link.rs         `GbLink`: zwei `Gb` im Gleichtakt am Linkkabel (Machine, DebugTarget, SaveState)
   joypad.rs       `Joypad`: P1, Tastenzuordnung, vier Spieler (SGB), Unterbrechung
   sgb.rs          `Sgb`: Pakete über P1, Paletten/Attribute, *_TRN aus dem Bild, Rahmen,
                   Maske, Mehrspieler; setzt die Ausgabe 256 × 224 zusammen
@@ -63,6 +64,8 @@ src/
   Bit 5) weiter, auch beim Zurücksetzen von DIV. Die Kanäle laufen im Grundtakt.
 - **SGB-Übertragungen:** `*_TRN` liest die 4 KB aus den Graustufen des nächsten fertigen Bildes
   (`Sgb::end_frame`), wie die Hardware nach `BGP`. Das SNES-BIOS ist nicht nachgebildet.
+- **Linkkabel:** `GbLink` führt immer das zurückliegende Gerät einen Schritt aus und gibt danach
+  dessen Taktimpulse (`Serial::pulses`) an die Gegenstelle weiter; deterministisch.
 - **CGB-Modus vs. Kompatibilität:** `ppu.color.cgb` = Hardware ist ein CGB, `cgb_mode` = CGB-
   Funktionen an. Register wie VBK, SVBK, KEY1 und HDMA prüfen `cgb_mode`.
 - **Uhr der Kassette:** zählt emulierte Takte (`Mapper::tick`); die Zeit zwischen zwei
@@ -76,4 +79,5 @@ src/
 - `tests/system.rs`: ganze Maschine mit Kassetten aus `tests/common` (`rom`, `serial_print`,
   `mooneye_pass`): HLE-Start, Timer, DMA, Boot-ROM, Debugger, Save-States.
 - `tests/render.rs`: Pixel des Framebuffers für Hintergrund, Scrollen, Objekte, Fenster.
+- `tests/link.rs`: Bytetausch zweier Geräte, Bildaufbau, Save-States im Linkbetrieb.
 - `tests/cgb.rs`: Paletten, Attribute, Banken, GDMA/HDMA, Taktumschaltung, Kompatibilität.

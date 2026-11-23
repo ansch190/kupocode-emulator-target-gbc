@@ -416,6 +416,18 @@ impl Gb {
         (self_loop && no_irq) || (self.cpu.halted && self.bus.ie & 0x1F == 0)
     }
 
+    /// Ein Schritt ohne Hook (für den Linkbetrieb).
+    pub fn link_step(&mut self) -> Option<StopReason> {
+        let stop = self.step_with(&mut NoHook);
+        self.refresh_tty();
+        stop
+    }
+
+    /// Ist seit der letzten Abfrage ein Bild fertig geworden?
+    pub fn take_frame_done(&mut self) -> bool {
+        std::mem::take(&mut self.frame_done)
+    }
+
     pub fn run_frame_with(&mut self, hook: &mut impl CpuHook) -> StopReason {
         self.frame_done = false;
         self.bp_resume = Some(self.cpu.pc);

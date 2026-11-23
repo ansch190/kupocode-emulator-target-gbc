@@ -99,6 +99,8 @@ Emulator). Der Gesamtplan ist maßgeblich; Abweichungen stehen dort unter „Ums
   einem Commit je Repo.
 - Prüfen, ob das Secret `KUPO_CI_TOKEN` in beiden Repos gesetzt ist, und `core.hooksPath` setzen.
 
+Umsetzung: emulator `0d20f4f`, compiler `956d9d3`; `.gitignore` in allen Repos mit gemeinsamem Teil (GBA/PS3 haben ihn noch nicht).
+
 ## Phase 1 – Emulator: SM83-Kern
 - `cpu/` mit `Cpu`, `trait CpuBus` (ein M-Zyklus entspricht genau einem Zugriff, wie beim NES) und
   `opcodes.rs`.
@@ -107,6 +109,8 @@ Emulator). Der Gesamtplan ist maßgeblich; Abweichungen stehen dort unter „Ums
   HALT-Bug, `STOP` und die gesperrten Opcodes.
 - `disasm.rs` (`decode`/`lines`) und `hook.rs` nach dem Muster von NES.
 - Tests mit einem selbst assemblierten Programm über `tests/common` (`Asm`) und je Befehl.
+
+Umsetzung: `d3dc20a`. Tests am flachen Testspeicher statt mit `tests/common` (`Asm`); `STOP` liest sein Folgebyte und ist aus der Zyklenprüfung genommen. Rücksprung auf `HALT` bei `EI;HALT` kam in Phase 10 dazu.
 
 ## Phase 2 – Emulator: Bus, Speicher, Timer, Maschine
 - `bus.rs` mit WRAM, HRAM, Echo-Bereich, OAM-Sperre und Bus-Konflikten während der OAM-DMA. Timer mit
@@ -118,6 +122,8 @@ Emulator). Der Gesamtplan ist maßgeblich; Abweichungen stehen dort unter „Ums
   Boot-ROM lässt sich über `with_boot_rom` laden, `FF50` blendet es aus.
 - CLI `run`, `test` und `disasm` wie beim NES.
 
+Umsetzung: `fe7e12a`. Testkassetten aus Maschinencode in `tests/common` (`rom`, `serial_print`, `mooneye_pass`).
+
 ## Phase 3 – Emulator: Kassette I
 - `cart/` mit Kopf-Parser (`CartridgeInfo`), `trait Mapper` und einer Datei je Mapper:
   - ROM-only,
@@ -127,12 +133,16 @@ Emulator). Der Gesamtplan ist maßgeblich; Abweichungen stehen dort unter „Ums
   - MBC5 mit Rumble.
 - Batterie-RAM mit Uhr im 48-Byte-Format, `advance_rtc`.
 
+Umsetzung: `34e8c01`. MBC30 (8-Bit-Bank) gleich mit.
+
 ## Phase 4 – Emulator: PPU (DMG)
 - Modi 0 bis 3, `LY`/`LYC`/`STAT` samt Blockieren der STAT-Unterbrechung und STAT-Schreibfehler des DMG.
 - Pixel-FIFO für Hintergrund, Fenster (interner Zeilenzähler) und Objekte (10 pro Zeile, Priorität nach
   X-Position).
 - Variable Länge von Mode 3, Sperren von OAM und VRAM, Ein- und Ausschalten des LCD (erstes Bild leer).
 - `views.rs` mit Kacheln, BG-Map, Fenster und OAM als `graphics_views()`.
+
+Umsetzung: `d1aaa25`. Mode-3-Längen 172/175/178/183 durch Tests abgesichert.
 
 ## Phase 5 – Emulator: CGB
 - `KEY1` mit Doppeltakt und Umschaltpause, VRAM-Bank 1, WRAM-Banken 1 bis 7.
@@ -142,11 +152,15 @@ Emulator). Der Gesamtplan ist maßgeblich; Abweichungen stehen dort unter „Ums
   `KEY0`, die undokumentierten Register `FF72` bis `FF77` und die Infrarot-Schnittstelle `RP` als Stub.
 - Ansichten für Paletten und VRAM-Bank 1.
 
+Umsetzung: `92418f7`. Abweichung: Die Palettenwahl des Boot-ROMs nach Titel-Prüfsumme ist nicht nachgebildet (Tabelle im Boot-ROM); DMG-Spiele bekommen die Standardpaletten des CGB (seit Phase 10), mit echtem Boot-ROM gilt dessen Wahl. Tastenkombinationen beim Start ebenfalls nicht.
+
 ## Phase 6 – Emulator: APU
 - Zwei Rechteckkanäle (Kanal 1 mit Sweep), Wellenkanal, Rauschkanal und Frame-Sequencer am DIV.
 - Eigenheiten von Länge, Hüllkurve („Zombie-Modus“) und Sweep, Zugriff auf das Wave-RAM (beim DMG
   beschädigt), Verhalten beim Ein- und Ausschalten.
 - CGB-Register `PCM12`/`PCM34`, Ausgabe mit 44,1 kHz.
+
+Umsetzung: `914dbed`, Test-Fix `f3f14ff`. Zombie-Modus der Hüllkurve und Wave-RAM-Beschädigung des DMG offen (`GB_OFFEN`, SameSuite).
 
 ## Phase 7 – Emulator: Super Game Boy
 - Paketübertragung über `P1`, `MLT_REQ` mit bis zu 4 Spielern.
@@ -156,10 +170,14 @@ Emulator). Der Gesamtplan ist maßgeblich; Abweichungen stehen dort unter „Ums
 - Die SNES-Seite wird per HLE nachgebildet. Die Ausgabe hat 256×224 Pixel mit Rahmen, der Takt richtet
   sich nach SGB1 bzw. SGB2.
 
+Umsetzung: `36381c4`. Das SNES-BIOS (Standardrahmen, Standardpaletten) ist nicht nachgebildet; Graustufen bis das Spiel Paletten sendet.
+
 ## Phase 8 – Emulator: Linkkabel
 - Seriell mit externem Takt und schnellem CGB-Takt.
 - `GbLink` mit zwei Geräten im Gleichtakt, das Bild zeigt sie nebeneinander, Save-State über beide.
 - Test: zwei selbst assemblierte Programme tauschen Bytes aus.
+
+Umsetzung: `ce679e5`.
 
 ## Phase 9 – Emulator: weitere Mapper
 - MBC6 mit Flash.
@@ -167,6 +185,8 @@ Emulator). Der Gesamtplan ist maßgeblich; Abweichungen stehen dort unter „Ums
 - HuC1 mit Infrarot als Stub und HuC3 mit Uhr, Infrarot als Stub.
 - MMM01.
 - Pocket Camera: Sensor mit Testbild oder Bilddatei, Registerverhalten und Belichtung.
+
+Umsetzung: `ac056b8`. Vereinfacht: Flash des MBC6 ohne Befehlsprotokoll, MMM01 nur mit 16-KB-Basis und Maske, Kamera ohne Kantenfilter und Verstärkung, HuC3-Ton ignoriert.
 
 ## Phase 10 – Emulator: Genauigkeit
 `tests/testroms.rs` arbeitet mit `KUPO_GB_TESTROMS` und folgenden Prüfmitteln:
@@ -178,6 +198,8 @@ Emulator). Der Gesamtplan ist maßgeblich; Abweichungen stehen dort unter „Ums
 
 Dazu eine `GB_OFFEN`-Liste und ein Rauchtest mit `KUPO_GB_GAMES` (`#[ignore]`). Eine
 Geschwindigkeitsmessung (`#[ignore]`) soll mindestens 10-fache Echtzeit im Release zeigen.
+
+Umsetzung: `2042e44`, `23e22b4`. Sammlung `c-sp/game-boy-test-roms` v7.0; 205 von 333 Fällen bestehen (u. a. cpu_instrs, instr_timing, mem_timing, halt_bug, beide acid2, der Großteil von Mooneye). Statt Golden-Hashes Vergleich mit den PNG-Bildern der Sammlung (eigener PNG-Leser). Offen in `GB_OFFEN`: PPU-Zeitverhalten um Mode 2/0 und nach dem Einschalten, Registeränderungen in Mode 3 (Mealybug), APU-Feinheiten (SameSuite), Startwerte des HLE-Starts, OAM-Fehler. Geschwindigkeit: 14-fache Echtzeit.
 
 ## Phase 11 – KupoCode Emulator (emulator-gui)
 - `Cargo.toml` bekommt die Abhängigkeit samt `opt-level 3`, `.cargo/config.toml.example` den `[patch]`.
@@ -191,3 +213,4 @@ Geschwindigkeitsmessung (`#[ignore]`) soll mindestens 10-fache Echtzeit im Relea
 - `keymap.rs` und `i18n.rs` (Deutsch und Englisch), Test `gb_programme_laufen_mit_save_states`.
 - `docs/architektur.md` anpassen; dort auch den fehlenden Eintrag für n64 nachtragen.
 
+Umsetzung: `09c5d89`. Ein Boot-ROM-Eintrag `bios_gb` statt drei: Es wird nur verwendet, wenn seine Größe zum Modell passt (256 Byte DMG/SGB, 2304 Byte CGB). Einstellungen `gb_model` und `gb_link`.

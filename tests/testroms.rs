@@ -193,10 +193,10 @@ fn mooneye_models(name: &str) -> Vec<Model> {
     if s.contains("dmgABC") || (s.chars().all(|c| c.is_ascii_uppercase()) && s.contains('G')) {
         out.push(Model::Dmg);
     }
-    if s.contains("cgb") || (s.chars().all(|c| c.is_ascii_uppercase()) && s.contains('C')) {
-        if !s.contains("cgb0") || s.contains("cgbABCDE") {
-            out.push(Model::Cgb);
-        }
+    if (s.contains("cgb") || (s.chars().all(|c| c.is_ascii_uppercase()) && s.contains('C')))
+        && (!s.contains("cgb0") || s.contains("cgbABCDE"))
+    {
+        out.push(Model::Cgb);
     }
     if s == "sgb" || (s.chars().all(|c| c.is_ascii_uppercase()) && s.contains('S')) {
         out.push(Model::Sgb);

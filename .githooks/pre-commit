@@ -1,0 +1,68 @@
+#!/bin/sh
+# Pre-commit-Hook des Kupo Environment: in allen Kupo-Repositories gleich, nur überall
+# gleichzeitig ändern. Einmal je Klon einschalten (clone-kupocode-all.sh macht das selbst):
+#
+#     git config core.hooksPath .githooks
+#
+# Prüfungen:
+#   1. Die lokale Cargo-Konfiguration (.cargo/config.toml) wird nicht eingecheckt.
+#   2. Die Cargo.lock wird nicht eingecheckt, nachdem Cargo die Git-Quellen der Kupo-Crates
+#      durch Pfadquellen auf die Nachbar-Ordner ersetzt hat (dann fehlt `source = "git+…"`).
+#   3. Geänderte Rust-Dateien sind mit rustfmt formatiert (wie `cargo fmt --check` in der CI).
+#
+# Im Notfall überspringen: git commit --no-verify
+
+fehler=0
+geaendert=$(git diff --cached --name-only --diff-filter=ACMR)
+
+# 1. Lokale Cargo-Konfiguration
+if printf '%s\n' "$geaendert" | grep -qx '.cargo/config.toml'; then
+    echo "Fehler: .cargo/config.toml ist lokal und gehört nicht ins Repository." >&2
+    echo "        git restore --staged .cargo/config.toml" >&2
+    fehler=1
+fi
+
+# 2. Cargo.lock mit Pfadquellen
+if printf '%s\n' "$geaendert" | grep -qx 'Cargo.lock'; then
+    # Crates dieses Repositorys stehen ohne `source` in der Cargo.lock – alle anderen nicht.
+    eigene=$(git ls-files 'Cargo.toml' '*/Cargo.toml' | while read -r datei; do
+        git show ":$datei" | tr -d '\r' | awk '
+            /^\[package\]/ { p = 1; next }
+            /^\[/          { p = 0 }
+            p && /^name *=/ { gsub(/"/, "", $3); print $3 }'
+    done)
+    ohne_quelle=$(git show :Cargo.lock | tr -d '\r' | awk '
+        function ende() { if (name != "" && !quelle) print name }
+        /^\[\[package\]\]/ { ende(); name = ""; quelle = 0; next }
+        /^name = /   { gsub(/"/, "", $3); name = $3 }
+        /^source = / { quelle = 1 }
+        END { ende() }')
+    pfadquelle=0
+    for name in $ohne_quelle; do
+        if ! printf '%s\n' "$eigene" | grep -qx "$name"; then
+            echo "Fehler: Cargo.lock führt '$name' als Pfadquelle (lokal umgebogen)." >&2
+            pfadquelle=1
+        fi
+    done
+    if [ "$pfadquelle" -ne 0 ]; then
+        echo "        Cargo.lock zurücksetzen (git restore --staged --worktree Cargo.lock) oder ohne" >&2
+        echo "        .cargo/config.toml mit 'cargo update <crate>' neu erzeugen." >&2
+        fehler=1
+    fi
+fi
+
+# 3. Formatierung der geänderten Rust-Dateien (Stand im Arbeitsverzeichnis)
+if printf '%s\n' "$geaendert" | grep -q '\.rs$'; then
+    if command -v rustfmt >/dev/null 2>&1; then
+        if ! git diff --cached --name-only -z --diff-filter=ACMR -- '*.rs' |
+            xargs -0 rustfmt --check --edition 2024 >/dev/null 2>&1; then
+            echo "Fehler: Rust-Dateien sind nicht formatiert. Beheben mit:" >&2
+            echo "        cargo fmt --all && git add -u" >&2
+            fehler=1
+        fi
+    else
+        echo "Hinweis: rustfmt nicht gefunden – Formatierung nicht geprüft." >&2
+    fi
+fi
+
+exit $fehler

@@ -1,0 +1,34 @@
+# Gemeinsamer Teil: in allen Kupo-Repositories gleich, nur überall gleichzeitig ändern.
+# Repository-eigene Regeln stehen ganz unten.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Rust: Zeilenbreite wie rustfmt (max_width = 100). Leerzeichen am Zeilenende nicht
+# entfernen: Testeingaben in String-Literalen enthalten sie absichtlich.
+[*.rs]
+max_line_length = 100
+trim_trailing_whitespace = false
+
+# Markdown: zwei Leerzeichen am Zeilenende sind ein Zeilenumbruch.
+[*.md]
+trim_trailing_whitespace = false
+
+# Konfigurations- und Auszeichnungsdateien
+[*.{toml,yml,yaml,json,xml,iml,svg}]
+indent_size = 2
+
+# Golden-Dateien schreiben die Tests selbst: byte-genau lassen.
+[tests/golden/**]
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+
+# ─── Repository-eigene Regeln ───
+
+# (derzeit keine)

@@ -1,0 +1,53 @@
+# Gemeinsamer Teil: in allen Kupo-Repositories gleich, nur überall gleichzeitig ändern.
+# Repository-eigene Regeln stehen ganz unten.
+
+# Textdateien immer mit LF speichern und auschecken, auch unter Windows
+# (passt zu .editorconfig und überstimmt ein systemweites core.autocrlf).
+* text=auto eol=lf
+
+# Hooks und Skripte laufen über sh: ausdrücklich Text mit LF.
+.githooks/* text eol=lf
+*.sh text eol=lf
+
+# Funktions- und Abschnittsnamen in den Kopfzeilen von git diff
+*.rs diff=rust
+*.md diff=markdown
+
+# Erzeugte Dateien: in GitHub-Diffs eingeklappt
+Cargo.lock linguist-generated=true
+tests/golden/** linguist-generated=true
+
+# Binärdateien: nie umwandeln, nicht als Text vergleichen
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.bmp binary
+*.ppm binary
+*.ttf binary
+*.otf binary
+*.woff2 binary
+*.wav binary
+*.zip binary
+*.bin binary
+*.iso binary
+*.img binary
+*.chd binary
+*.nes binary
+*.sfc binary
+*.z64 binary
+*.exe binary
+*.psexe binary
+*.elf binary
+*.chr binary
+*.tim binary
+*.vag binary
+*.mcr binary
+*.mcd binary
+*.sav binary
+*.state binary
+*.kstate binary
+
+# ─── Repository-eigene Regeln ───
+
+# (derzeit keine)

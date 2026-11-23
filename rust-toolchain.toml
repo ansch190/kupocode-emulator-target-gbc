@@ -1,0 +1,9 @@
+# In allen Kupo-Repositories gleich, nur überall gleichzeitig ändern.
+#
+# Immer das aktuelle stable-Rust (Edition 2024). rustfmt und clippy brauchen der
+# Pre-commit-Hook und die CI, rust-src die Standardbibliothek in RustRover.
+# Neue Clippy-Lints einer neuen stable-Version fallen im nächtlichen CI-Lauf auf.
+[toolchain]
+channel = "stable"
+profile = "default"
+components = ["rustfmt", "clippy", "rust-src"]

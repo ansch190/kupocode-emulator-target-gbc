@@ -129,3 +129,146 @@ fn kopf_und_typen() {
     );
     assert!(info.into_mapper(r).is_ok());
 }
+
+#[test]
+fn huc1_infrarot_und_banken() {
+    let mut m = HuC1::new(rom(64), 0x8000, true);
+    m.write(0x2000, 0x21);
+    assert_eq!(m.read(0x4000), 0x21);
+    m.write(0xA000, 0x55);
+    assert_eq!(m.read(0xA000), 0x55);
+    m.write(0x0000, 0x0E);
+    assert_eq!(m.read(0xA000), 0xC0);
+}
+
+#[test]
+fn mmm01_menue_dann_spiel() {
+    let mut m = Mmm01::new(rom(64), 0, false);
+    assert_eq!(m.read(0x0000), 62); // Menü in den letzten beiden Bänken
+    assert_eq!(m.read(0x4000), 63);
+    m.write(0x2000, 8); // Spiel ab Bank 8
+    m.write(0x6000, 3 << 2); // 8 Bänke
+    m.write(0x0000, 0x40); // sperren
+    assert_eq!(m.read(0x0000), 8);
+    m.write(0x2000, 3);
+    assert_eq!(m.read(0x4000), 11);
+    m.write(0x2000, 9); // maskiert auf 8 Bänke
+    assert_eq!(m.read(0x4000), 9);
+}
+
+#[test]
+fn mbc6_fenster_und_flash() {
+    let mut r = rom(8);
+    r[0x2000 * 5] = 0x55; // 8-KB-Bank 5
+    let mut m = Mbc6::new(r, 0x8000, true);
+    m.write(0x2000, 5);
+    assert_eq!(m.read(0x4000), 0x55);
+    m.write(0x0C00, 1); // Flash an
+    m.write(0x1000, 1); // beschreibbar
+    m.write(0x3800, 0x08); // Fenster B aus dem Flash
+    m.write(0x3000, 2);
+    m.write(0x6000, 0x12);
+    assert_eq!(m.read(0x6000), 0x12);
+    m.write(0x0000, 0x0A);
+    m.write(0x0800, 3);
+    m.write(0xB000, 0x77);
+    assert_eq!(m.read(0xB000), 0x77);
+}
+
+/// Sendet Bits über `A080` (CS gesetzt, Takt steigend).
+fn eeprom_bits(m: &mut Mbc7, bits: &[u8]) {
+    for &b in bits {
+        m.write(0xA080, 0x80 | b << 1);
+        m.write(0xA080, 0xC0 | b << 1);
+    }
+}
+
+#[test]
+fn mbc7_eeprom_schreiben_und_lesen() {
+    let mut m = Mbc7::new(rom(4));
+    m.write(0x0000, 0x0A);
+    m.write(0x4000, 0x40);
+    // EWEN: 1 00 11xxxxxx
+    eeprom_bits(&mut m, &[1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0]);
+    m.write(0xA080, 0x00);
+    // WRITE Adresse 5: 1 01 0000101, dann 0x1234
+    eeprom_bits(&mut m, &[1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1]);
+    let data: Vec<u8> = (0..16).rev().map(|i| (0x1234u16 >> i & 1) as u8).collect();
+    eeprom_bits(&mut m, &data);
+    m.write(0xA080, 0x00);
+    // READ Adresse 5: 1 10 0000101, dann 16 Takte
+    eeprom_bits(&mut m, &[1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1]);
+    assert_eq!(m.read(0xA080) & 1, 0); // Dummy-Bit
+    let mut v = 0u16;
+    for _ in 0..16 {
+        m.write(0xA080, 0x80);
+        m.write(0xA080, 0xC0);
+        v = v << 1 | u16::from(m.read(0xA080) & 1);
+    }
+    assert_eq!(v, 0x1234);
+    assert_eq!(&m.battery_ram(0)[10..12], &[0x34, 0x12]);
+}
+
+#[test]
+fn mbc7_neigung() {
+    let mut m = Mbc7::new(rom(4));
+    m.write(0x0000, 0x0A);
+    m.write(0x4000, 0x40);
+    m.set_tilt(0, 0);
+    m.write(0xA000, 0x55);
+    m.write(0xA010, 0xAA);
+    assert_eq!(
+        u16::from(m.read(0xA020)) | u16::from(m.read(0xA030)) << 8,
+        0x81D0
+    );
+    m.set_tilt(127, 0);
+    m.write(0xA000, 0x55);
+    m.write(0xA010, 0xAA);
+    let x = u16::from(m.read(0xA020)) | u16::from(m.read(0xA030)) << 8;
+    assert!(x < 0x81D0 - 0x60, "{x:04X}");
+}
+
+#[test]
+fn huc3_uhr_ueber_befehle() {
+    let mut m = HuC3::new(rom(4), 0x8000, true);
+    m.tick(rtc::CYCLES_PER_SECOND * 125); // 2 Minuten 5 Sekunden
+    m.write(0x0000, 0x0B);
+    m.write(0xA000, 0x60); // Uhrzeit in den Speicher
+    m.write(0xA000, 0x40); // Adresse 0
+    m.write(0xA000, 0x50);
+    m.write(0xA000, 0x10); // lesen
+    m.write(0x0000, 0x0C);
+    assert_eq!(m.read(0xA000) & 0x0F, 2);
+    m.write(0x0000, 0x0D);
+    assert_eq!(m.read(0xA000), 0x01);
+}
+
+#[test]
+fn kamera_nimmt_bild_auf() {
+    let mut m = Camera::new(rom(4), true);
+    m.set_camera_image(&vec![0u8; 128 * 112]); // schwarz
+    m.write(0x0000, 0x0A);
+    m.write(0x4000, 0x10);
+    m.write(0xA002, 0x10); // Belichtung
+    for i in 0..48u16 {
+        m.write(0xA006 + i, [0x40, 0x80, 0xC0][usize::from(i % 3)]);
+    }
+    m.write(0xA000, 0x01);
+    assert_eq!(m.read(0xA000) & 1, 1);
+    m.tick(4_000_000);
+    assert_eq!(m.read(0xA000) & 1, 0);
+    m.write(0x4000, 0x00);
+    assert_eq!((m.read(0xA100), m.read(0xA101)), (0xFF, 0xFF)); // Farbe 3
+}
+
+#[test]
+fn neue_kassettentypen_werden_erkannt() {
+    for t in [0x0B, 0x20, 0x22, 0xFC, 0xFE, 0xFF] {
+        let mut r = rom(8);
+        r[0x147] = t;
+        r[0x148] = 2;
+        r[0x149] = 3;
+        let info = CartridgeInfo::parse(&r).unwrap();
+        assert!(info.into_mapper(r).is_ok(), "Typ {t:02X}");
+    }
+}

@@ -32,6 +32,8 @@ src/
   views.rs        Debug-Ansichten: Kacheln, Kachelkarten, OAM, CGB-Paletten
   cart/           `CartridgeInfo` (Kopf, Typen), `trait Mapper`, `Memory` (ROM/RAM mit Banken)
     rom_only.rs mbc1.rs (mit MBC1M) mbc2.rs mbc3.rs (mit MBC30) mbc5.rs (mit Rumble)
+    mbc6.rs (Flash) mbc7.rs (Neigung, EEPROM 93LC56) huc1.rs huc3.rs (Uhr) mmm01.rs
+    camera.rs     Pocket Camera: Register, Aufnahme, Schwellwertmatrix
     rtc.rs        `Rtc`: Uhr des MBC3, Latch, 48-Byte-Anhang (BGB/VBA)
     tests.rs      Banken, Modi, Uhr, Batterieformat
   cpu/            SM83: `Cpu`, `trait CpuBus` (ein Aufruf = ein M-Zyklus), `Step`

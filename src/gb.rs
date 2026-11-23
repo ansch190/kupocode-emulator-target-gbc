@@ -516,6 +516,13 @@ impl Gb {
         }
     }
 
+    /// Setzt das Sensorbild der Pocket Camera (128 × 112 Graustufen, 0 = schwarz).
+    pub fn set_camera_image(&mut self, image: &[u8]) {
+        if let Some(c) = self.bus.cart.as_mut() {
+            c.set_camera_image(image);
+        }
+    }
+
     /// Läuft der Rumble-Motor der Kassette?
     pub fn rumble(&self) -> bool {
         self.bus.cart.as_ref().is_some_and(|c| c.rumble())
@@ -565,6 +572,10 @@ impl Machine for Gb {
                 Default::default()
             };
             self.bus.joypad.set_buttons(i, buttons);
+        }
+        if let Some(c) = self.bus.cart.as_mut() {
+            let (x, y) = input.pads[0].left_stick;
+            c.set_tilt(x, y);
         }
     }
 

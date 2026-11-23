@@ -1,19 +1,31 @@
 //! Kassette: Kopf (`0x100`–`0x14F`) und Mapper.
 
+mod camera;
+mod huc1;
+mod huc3;
 mod mbc1;
 mod mbc2;
 mod mbc3;
 mod mbc5;
+mod mbc6;
+mod mbc7;
+mod mmm01;
 mod rom_only;
-mod rtc;
+pub mod rtc;
 
 #[cfg(test)]
 mod tests;
 
+pub use camera::Camera;
+pub use huc1::HuC1;
+pub use huc3::HuC3;
 pub use mbc1::Mbc1;
 pub use mbc2::Mbc2;
 pub use mbc3::Mbc3;
 pub use mbc5::Mbc5;
+pub use mbc6::Mbc6;
+pub use mbc7::Mbc7;
+pub use mmm01::Mmm01;
 pub use rom_only::RomOnly;
 pub use rtc::Rtc;
 
@@ -135,6 +147,12 @@ impl CartridgeInfo {
                 matches!(self.cart_type, 0x0F | 0x10),
             )),
             0x19..=0x1E => Box::new(Mbc5::new(rom, ram, battery, self.cart_type >= 0x1C)),
+            0x0B..=0x0D => Box::new(Mmm01::new(rom, ram, battery)),
+            0x20 => Box::new(Mbc6::new(rom, ram, true)),
+            0x22 => Box::new(Mbc7::new(rom)),
+            0xFC => Box::new(Camera::new(rom, true)),
+            0xFE => Box::new(HuC3::new(rom, ram, true)),
+            0xFF => Box::new(HuC1::new(rom, ram, true)),
             t => {
                 return Err(format!(
                     "Kassettentyp ${t:02X} ({}) wird noch nicht unterstützt",
@@ -177,6 +195,10 @@ pub trait Mapper: Send {
     }
     /// Stellt die Uhr der Kassette um `seconds` vor (Zeit, in der das Spiel nicht lief).
     fn advance_rtc(&mut self, _seconds: u64) {}
+    /// Neigung für den Beschleunigungssensor (MBC7), −128 … 127 je Achse.
+    fn set_tilt(&mut self, _x: i8, _y: i8) {}
+    /// Sensorbild der Pocket Camera (128 × 112 Graustufen).
+    fn set_camera_image(&mut self, _image: &[u8]) {}
     /// Läuft der Rumble-Motor?
     fn rumble(&self) -> bool {
         false

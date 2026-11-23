@@ -135,3 +135,21 @@ fn breakpoint_und_step_over() {
     assert_eq!(gb.step_out(), StopReason::StepDone);
     assert_eq!(gb.cpu.pc, 0x153);
 }
+
+#[test]
+fn ton_liefert_44100_abtastwerte_je_sekunde() {
+    use kupocode_emulator_gbc::core::audio::AudioBuffer;
+    let mut gb = Gb::from_rom(&rom(&[0x18, 0xFE], &[])).unwrap();
+    let mut audio = AudioBuffer::new(44_100);
+    for _ in 0..60 {
+        gb.run_frame();
+        gb.drain_audio(&mut audio);
+    }
+    // 60 Bilder à 70224 Takte bei 4,194304 MHz ≈ 1,0046 s
+    let expected = 44_100.0 * 60.0 * 70_224.0 / 4_194_304.0;
+    assert!(
+        (audio.frames() as f64 - expected).abs() < 3.0,
+        "{}",
+        audio.frames()
+    );
+}

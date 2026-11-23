@@ -231,6 +231,7 @@ impl Gb {
             (0xFF24, 0x77),
             (0xFF25, 0xF3),
         ];
+        b.poke(0xFF26, 0x80);
         for (addr, v) in APU {
             b.poke(addr, v);
         }
@@ -560,7 +561,11 @@ impl Machine for Gb {
         &self.framebuffer
     }
 
-    fn drain_audio(&mut self, _out: &mut AudioBuffer) {}
+    fn drain_audio(&mut self, out: &mut AudioBuffer) {
+        for pair in self.bus.apu.take_samples().as_chunks::<2>().0 {
+            out.push(pair[0], pair[1]);
+        }
+    }
 
     fn cycles(&self) -> u64 {
         self.bus.cycles

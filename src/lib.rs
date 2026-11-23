@@ -8,6 +8,7 @@
 
 pub use kupocode_emulator_core as core;
 
+pub mod apu;
 pub mod bus;
 pub mod cart;
 pub mod cpu;

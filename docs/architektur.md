@@ -21,6 +21,7 @@ src/
   bus.rs          `Bus`: Adressraum, I/O, OAM-DMA, Boot-ROM, Watchpoints; taktet die Peripherie;
                   `CgbRegs` (KEY1/Doppeltakt, HDMA/GDMA, RP, FF72–FF75)
   timer.rs        `Timer`: Systemzähler/DIV, TIMA mit Flanken- und Ladeverhalten
+  apu.rs          `Apu`: vier Kanäle, Frame-Sequencer, Mischung, Hochpass, 44,1 kHz
   serial.rs       `Serial`: SB/SC, Ausgabe für Testprogramme
   joypad.rs       `Joypad`: P1, Tastenzuordnung, Unterbrechung
   ppu.rs          `Ppu`: Zeilen und Modi, LY/STAT, OAM-Suche, Fetcher und Pixel-FIFOs;
@@ -56,6 +57,8 @@ src/
   DMA als `$FF` und verwirft Schreibzugriffe; `peek`/`poke` des Debuggers sind nicht gesperrt.
 - **Takte beim CGB:** Timer und Serielle zählen CPU-Takte, PPU und Kassettenuhr den Grundtakt.
   Bei doppeltem Takt läuft die PPU 2 Punkte je M-Zyklus; `Bus::cycles` zählt den Grundtakt.
+- **Frame-Sequencer der APU:** schaltet bei der fallenden Flanke von DIV Bit 4 (doppelter Takt:
+  Bit 5) weiter, auch beim Zurücksetzen von DIV. Die Kanäle laufen im Grundtakt.
 - **CGB-Modus vs. Kompatibilität:** `ppu.color.cgb` = Hardware ist ein CGB, `cgb_mode` = CGB-
   Funktionen an. Register wie VBK, SVBK, KEY1 und HDMA prüfen `cgb_mode`.
 - **Uhr der Kassette:** zählt emulierte Takte (`Mapper::tick`); die Zeit zwischen zwei

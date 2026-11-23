@@ -6,6 +6,7 @@
 use kupocode_emulator_core::debug::{Access, Breakpoints};
 use kupocode_emulator_core::state::{StateError, StateReader, StateWriter};
 
+use crate::apu::Apu;
 use crate::cart::Mapper;
 use crate::cpu::CpuBus;
 use crate::joypad::Joypad;
@@ -52,8 +53,7 @@ pub struct Bus {
     pub serial: Serial,
     pub joypad: Joypad,
     pub ppu: Ppu,
-    /// Register der APU (`FF10`–`FF3F`), bis zur Tonausgabe unverändert gespeichert.
-    pub apu_regs: [u8; 0x30],
+    pub apu: Apu,
     /// Letzter Wert von `FF46`.
     pub dma_reg: u8,
     /// Laufende OAM-DMA: nächstes Byte (0–159), `None` = keine.
@@ -89,7 +89,7 @@ impl Bus {
             serial,
             joypad: Joypad::default(),
             ppu,
-            apu_regs: [0; 0x30],
+            apu: Apu::new(model.is_cgb()),
             dma_reg: 0,
             dma_index: None,
             dma_delay: 0,
@@ -143,7 +143,7 @@ impl Bus {
             0xFF01 | 0xFF02 => self.serial.read(addr),
             0xFF04..=0xFF07 => self.timer.read(addr),
             0xFF0F => self.if_ | 0xE0,
-            0xFF10..=0xFF3F => self.apu_regs[usize::from(addr - 0xFF10)],
+            0xFF10..=0xFF3F => self.apu.read(addr),
             0xFF46 => self.dma_reg,
             0xFF40..=0xFF4B => self.ppu.read(addr),
             0xFF4D if self.cgb_mode() => {
@@ -163,7 +163,12 @@ impl Bus {
             0xFF72 | 0xFF73 if self.model.is_cgb() => self.cgb.undoc[usize::from(addr - 0xFF72)],
             0xFF74 if self.cgb_mode() => self.cgb.undoc[2],
             0xFF75 if self.model.is_cgb() => self.cgb.undoc[3] | 0x8F,
-            0xFF76 | 0xFF77 if self.model.is_cgb() => 0x00,
+            0xFF76 | 0xFF77 if self.model.is_cgb() => {
+                // PCM12/PCM34: digitale Ausgänge der Kanäle
+                let o = self.apu.outputs();
+                let i = usize::from(addr - 0xFF76) * 2;
+                o[i] | o[i + 1] << 4
+            }
             0xFF80..=0xFFFE => self.hram[usize::from(addr - 0xFF80)],
             0xFFFF => self.ie,
             _ => 0xFF,
@@ -189,9 +194,16 @@ impl Bus {
             0xFE00..=0xFE9F => self.ppu.oam[usize::from(addr - 0xFE00)] = v,
             0xFF00 => self.joypad.write(v),
             0xFF01 | 0xFF02 => self.serial.write(addr, v),
-            0xFF04..=0xFF07 => self.timer.write(addr, v),
+            0xFF04 => {
+                // Zurücksetzen von DIV kann eine fallende Flanke für den Frame-Sequencer sein.
+                if self.timer.counter & self.apu_div_bit() != 0 {
+                    self.apu.frame_step();
+                }
+                self.timer.write(addr, v);
+            }
+            0xFF05..=0xFF07 => self.timer.write(addr, v),
             0xFF0F => self.if_ = v & 0x1F,
-            0xFF10..=0xFF3F => self.apu_regs[usize::from(addr - 0xFF10)] = v,
+            0xFF10..=0xFF3F => self.apu.write(addr, v),
             0xFF46 => {
                 self.dma_reg = v;
                 self.dma_delay = 2;
@@ -284,6 +296,16 @@ impl Bus {
         }
     }
 
+    /// Bit des Systemzählers, dessen fallende Flanke den Frame-Sequencer weiterschaltet
+    /// (`DIV` Bit 4, bei doppeltem Takt Bit 5).
+    fn apu_div_bit(&self) -> u16 {
+        if self.cgb.double_speed {
+            1 << 13
+        } else {
+            1 << 12
+        }
+    }
+
     /// Ein M-Zyklus der Peripherie samt HBlank-DMA.
     fn step_peripherals(&mut self) {
         self.tick_hardware();
@@ -307,6 +329,11 @@ impl Bus {
         if self.serial.tick(old, self.timer.counter) {
             self.if_ |= IRQ_SERIAL;
         }
+        let bit = self.apu_div_bit();
+        if old & bit != 0 && self.timer.counter & bit == 0 {
+            self.apu.frame_step();
+        }
+        self.apu.tick(dots);
         if self.joypad.tick() {
             self.if_ |= IRQ_JOYPAD;
         }
@@ -363,7 +390,7 @@ impl Bus {
         self.serial.save_state(w);
         self.joypad.save_state(w);
         self.ppu.save_state(w);
-        w.bytes(&self.apu_regs);
+        self.apu.save_state(w);
         w.u8(self.dma_reg);
         w.option(self.dma_index.as_ref(), |w, &i| w.u8(i));
         w.u8(self.dma_delay);
@@ -398,7 +425,7 @@ impl Bus {
         self.serial.load_state(r)?;
         self.joypad.load_state(r)?;
         self.ppu.load_state(r)?;
-        r.bytes_into(&mut self.apu_regs)?;
+        self.apu.load_state(r)?;
         self.dma_reg = r.u8()?;
         self.dma_index = r.option(|r| r.u8())?;
         self.dma_delay = r.u8()?;
